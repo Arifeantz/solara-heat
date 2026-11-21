@@ -100,6 +100,12 @@
   button:active { transform: translateY(3px); box-shadow: 0 2px 0 #b95f16; }
   button.ghost { background: rgba(255,255,255,.85); color: #17303e; box-shadow: 0 5px 0 rgba(30,50,60,.5), 0 10px 24px rgba(0,0,0,.3); }
   #menu .foot { margin-top: 22px; font-size: 13px; color: rgba(16,40,52,.75); font-weight: 600; position: relative; }
+  #menu .tip {
+    margin-top: 14px; max-width: 560px; font-size: 14.5px; line-height: 1.45; font-weight: 650;
+    color: #17303e; background: rgba(255,255,255,.45); border-radius: 10px; padding: 9px 16px;
+    position: relative; transition: opacity .5s;
+  }
+  #menu .tip b { color: #b95f16; letter-spacing: 1px; }
   .dark { background: rgba(10, 12, 18, .72); backdrop-filter: blur(3px); }
   .dark h1 { font-size: clamp(40px, 8vw, 76px); font-weight: 900; letter-spacing: 3px; }
   .dark p { margin-top: 12px; font-size: 18px; line-height: 1.5; max-width: 520px; }
@@ -151,14 +157,43 @@
     <b>F or Click</b><span>punch</span>
     <b>Shift</b><span>run</span>
     <b>Space</b><span>brake</span>
-    <b>P</b><span>pause &nbsp;·&nbsp; M mute</span>
+    <b>T</b><span>answer the CabCo phone (in a car)</span>
+    <b>C</b><span>render quality &nbsp;·&nbsp; P pause &nbsp;·&nbsp; M mute</span>
+    <b>Gamepad</b><span>sticks drive, A = E, Y = phone, Start = pause</span>
   </div>
   <div class="btnrow">
     <button id="startbtn">START ENGINE</button>
     <button id="continuebtn" class="ghost hidden">CONTINUE</button>
   </div>
+  <p class="tip" id="tip"><b>TIP</b> · <span id="tiptext">Breaking line of sight is how heat dies: duck behind a tower, stay clean, and count to five.</span></p>
   <p class="foot">An original open-world game. Port Solana, its people and its cars exist nowhere else.</p>
 </div>
+<script>
+  // the menu's rotating field notes — small true things about the town,
+  // swapped while the player reads the controls
+  (function () {
+    var tips = [
+      'Breaking line of sight is how heat dies: duck behind a tower, stay clean, and count to five.',
+      'Behind any wheel, press T: CabCo fares pay rent between Marina\u2019s jobs, and smooth drivers keep the tip.',
+      'West of the avenues is Solana Heights — a university quarter with a clock tower, an observatory, and students who wave back.',
+      'At four stars the police stop chasing and start walling: watch for two cruisers parked across an intersection.',
+      'The runway is 470 metres of empty asphalt. The Night Flight clock knows it. So does a Vandal GT.',
+      'A gamepad works too: left stick to steer, triggers to drive, Y answers the CabCo phone.',
+      'On a weak graphics card, press C in game to lighten the render quality without shrinking the window.'
+    ];
+    var i = 0;
+    var el = document.getElementById('tiptext');
+    var box = document.getElementById('tip');
+    setInterval(function () {
+      i = (i + 1) % tips.length;
+      box.style.opacity = '0';
+      setTimeout(function () {
+        el.textContent = tips[i];
+        box.style.opacity = '1';
+      }, 500);
+    }, 6000);
+  })();
+</script>
 
 <div id="pause" class="screen dark hidden">
   <h1>PAUSED</h1>

@@ -21,3 +21,16 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------
+
+Notices (not part of the license terms above):
+
+Solara Heat — Port Solana is an original work. The game, its engine,
+its city and districts (Port Solana, Solana Airfield, Solana Marina,
+and Solana Heights), its vehicles, people, missions and text were all
+written for this project and ship under the MIT License above. No
+third-party code, art, audio or other assets are included; the one
+exception is vendor/makefun-game.ts, the make.fun kit's own dossier
+library, included unchanged as the bounty requires and governed by
+its own terms as distributed with that kit.

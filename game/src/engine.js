@@ -177,6 +177,33 @@ export class GeoBuilder {
     }
     return this;
   }
+  // A triangular prism: the ridge runs along X, the cross-section is a
+  // triangle in the (z, y) plane — base width sz, height sy, length sx.
+  // Pediments, ramps, awnings and roof wedges are all this one shape.
+  prism(cx, cy, cz, sx, sy, sz, color) {
+    const x0 = cx - sx / 2, x1 = cx + sx / 2;
+    const yb = cy - sy / 2, yt = cy + sy / 2;
+    const zb = cz - sz / 2, zf = cz + sz / 2;
+    // the two slopes: their normals lean out and up, steeper as sy grows
+    const nf = norm3([0, sz, 2 * sy]);
+    const nb = norm3([0, sz, -2 * sy]);
+    this.quad([x0, yb, zf], [x1, yb, zf], [x1, yt, cz], [x0, yt, cz], nf, color);
+    this.quad([x1, yb, zb], [x0, yb, zb], [x0, yt, cz], [x1, yt, cz], nb, color);
+    // the floor nobody sees, kept so the shape is closed from below
+    this.quad([x0, yb, zb], [x1, yb, zb], [x1, yb, zf], [x0, yb, zf], [0, -1, 0], color);
+    // the two triangular ends
+    const tri = (a, b, c, n) => {
+      const i = this.base;
+      this.pushVert(...a, ...n, color, 0, 0);
+      this.pushVert(...b, ...n, color, 1, 0);
+      this.pushVert(...c, ...n, color, 0.5, 1);
+      this.idx.push(i, i + 1, i + 2);
+      this.base += 3;
+    };
+    tri([x0, yb, zf], [x0, yb, zb], [x0, yt, cz], [-1, 0, 0]);
+    tri([x1, yb, zb], [x1, yb, zf], [x1, yt, cz], [1, 0, 0]);
+    return this;
+  }
   build(gl) {
     const mesh = new Mesh(gl);
     mesh.upload(this.pos, this.nor, this.col, this.uv, this.idx);
@@ -314,12 +341,23 @@ export class Renderer {
     this.fogNear = 150;
     this.fogFar = 500;
     this.camPos = [0, 0, 0];
+    // render scale: 1 is full resolution; lower values trade sharpness
+    // for frame rate on weak GPUs (the canvas CSS size never changes)
+    this.scaleFactor = 1;
   }
   resize(w, h) {
-    this.canvas.width = w;
-    this.canvas.height = h;
-    this.gl.viewport(0, 0, w, h);
+    const pw = Math.max(1, Math.round(w * this.scaleFactor));
+    const ph = Math.max(1, Math.round(h * this.scaleFactor));
+    this.canvas.width = pw;
+    this.canvas.height = ph;
+    this.gl.viewport(0, 0, pw, ph);
     this.proj = Mat4.perspective((62 * Math.PI) / 180, w / h, 0.1, 900);
+  }
+  // Cycle-friendly quality control: remembers the CSS size it was last
+  // given so a scale change re-renders at the same on-screen size.
+  setQuality(scale) {
+    this.scaleFactor = scale;
+    this.resize(window.innerWidth, window.innerHeight);
   }
   makeTexture(canvas) {
     const gl = this.gl;

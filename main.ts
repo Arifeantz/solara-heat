@@ -83,8 +83,10 @@ function listFiles(dir: string, rel: string, out: string[]): string[] {
 // output directory, replacing the copy a previous run left there. Only
 // the two named subdirectories of the output are ever removed — never
 // the output directory itself, which may be a mount the grader owns.
-// Returns how many files were copied and their total size in bytes.
-function copyTree(from: string, to: string): { files: number; bytes: number } {
+// Every file is reported as it lands, so a hand-in watched live shows
+// its progress instead of going quiet between the trees. Returns how
+// many files were copied and their total size in bytes.
+function copyTree(from: string, to: string, tree: string): { files: number; bytes: number } {
   if (!existsSync(from) || !lstatSync(from).isDirectory()) {
     throw new Error(`${from}: no such directory (an entry hands in its game/ and screenshots/)`);
   }
@@ -99,6 +101,7 @@ function copyTree(from: string, to: string): { files: number; bytes: number } {
     writeFileSync(target, data);
     files += 1;
     bytes += data.length;
+    console.log(`  ${tree}/${rel} — ${data.length} bytes`);
   }
   return { files, bytes };
 }
@@ -113,11 +116,31 @@ function main(): void {
   let totalFiles = 0;
   let totalBytes = 0;
   for (const tree of TREES) {
-    const copied = copyTree(join(src, tree), join(out, tree));
+    console.log(`${tree}/:`);
+    const copied = copyTree(join(src, tree), join(out, tree), tree);
     totalFiles += copied.files;
     totalBytes += copied.bytes;
     console.log(`${tree}/: ${copied.files} files, ${copied.bytes} bytes`);
   }
+
+  // Prove the copies before the dossier vouches for them: each output
+  // tree must mirror its source exactly — the same relative paths in
+  // the same order, every file the same size. A copy that quietly lost
+  // or truncated a file is a failed hand-in, and it should fail here,
+  // in this program's own voice, not later in the scorer's.
+  for (const tree of TREES) {
+    const srcFiles = listFiles(join(src, tree), '', []);
+    const outFiles = listFiles(join(out, tree), '', []);
+    if (srcFiles.length !== outFiles.length || srcFiles.some((f, i) => f !== outFiles[i])) {
+      throw new Error(`${tree}/: the shipped copy does not mirror the source tree`);
+    }
+    for (const rel of srcFiles) {
+      const a = lstatSync(join(src, tree, rel)).size;
+      const b = lstatSync(join(out, tree, rel)).size;
+      if (a !== b) throw new Error(`${tree}/${rel}: shipped ${b} bytes, source holds ${a}`);
+    }
+  }
+  console.log(`copies verified: ${totalFiles} files mirror the source trees exactly`);
 
   // The dossier, from the kit library, over what was just shipped.
   const dossier = buildDossier(out, CAPS);
@@ -137,7 +160,17 @@ function main(): void {
   ) {
     throw new Error(`${DOSSIER_NAME}: not a ${DOSSIER_SCHEMA} dossier`);
   }
-  console.log(`${DOSSIER_NAME}: ${written.length} bytes (${totalFiles} files, ${totalBytes} bytes shipped)`);
+  // And the strongest check this program can make: build the dossier a
+  // second time, over the same shipped directory, and require the same
+  // bytes. The dossier is a function of the files' bytes and nothing
+  // else — if a rebuild disagrees, something outside the files (a
+  // clock, a filesystem order, a stray write) has crept into the
+  // hand-in, and the scorer's recomputation would catch it unkindly.
+  const rebuilt = buildDossier(out, CAPS);
+  if (rebuilt.length !== written.length || !Buffer.from(rebuilt).equals(written)) {
+    throw new Error(`${DOSSIER_NAME}: a rebuild over the shipped directory disagrees — the dossier is not deterministic`);
+  }
+  console.log(`${DOSSIER_NAME}: ${written.length} bytes (${totalFiles} files, ${totalBytes} bytes shipped), rebuild byte-identical`);
 }
 
 main();

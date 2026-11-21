@@ -284,6 +284,31 @@ export function buildCity(gl, textures) {
     landmarks.lighthouse = { x: cx - 14, z: cz - 8, name: 'Solana Point Lighthouse' };
   }
 
+  // ---- bus stops: a shelter, a bench and a sign on three corners.
+  // The buses themselves are a rumour in Port Solana (ask any CabCo
+  // passenger), but the stops are real, and people wait at them anyway.
+  const shelterAt = (sx, sz, ry) => {
+    const s = new GeoBuilder();
+    const roofCol = hexColor(0x2a6f77);
+    const postCol = hexColor(0x3c4147);
+    for (const px of [-1.9, 1.9]) {
+      for (const pz of [-0.8, 0.8]) {
+        s.cylinder(px, 1.25, pz, 0.06, 0.07, 2.5, 5, postCol);
+      }
+    }
+    s.box(0, 2.6, 0, 4.6, 0.14, 2.2, roofCol); // the shelter roof
+    s.box(0, 1.35, -0.85, 4.4, 0.75, 0.08, hexColor(0x9fd8e8)); // glass back
+    s.box(0, 0.55, 0, 3.6, 0.1, 0.5, hexColor(0x7a5c3e)); // the bench seat
+    s.box(-1.6, 0.28, 0, 0.1, 0.55, 0.45, postCol);
+    s.box(1.6, 0.28, 0, 0.1, 0.55, 0.45, postCol);
+    s.cylinder(2.6, 1.5, 0, 0.05, 0.06, 3, 5, postCol); // the stop pole
+    s.box(2.6, 2.9, 0, 0.7, 0.55, 0.08, hexColor(0xe9c46a)); // its yellow flag
+    mergeInto(plain, s, Mat4.compose(sx, 0.02, sz, 0, ry, 0, 1, 1, 1));
+  };
+  shelterAt(8.6, -60, Math.PI / 2);
+  shelterAt(-98.6, 30, -Math.PI / 2);
+  shelterAt(98.6, 148, Math.PI / 2);
+
   // ---- bake the merged meshes
   const addBaked = (builder, texture, emissive) => {
     if (builder.idx.length === 0) return;

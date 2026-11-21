@@ -82,6 +82,118 @@ export const MISSION_DEFS = [
   },
 ];
 
+// ------------------------------------------------------------ side jobs
+// After the story, work in Port Solana is not only crates. The Side Jobs
+// are three authored errands that rotate with the Encore Runs: a
+// professor late for his own lecture, a box of photographic plates that
+// must reach the airfield unbroken, and the Derby Day Loop — four
+// checkpoints across the whole map, the Heights included. Each carries
+// a route: a list of legs, each leg a landmark, an arrival radius, the
+// objective line for that leg, and what is said when you roll in.
+export const SIDE_DEFS = [
+  {
+    id: 'campus',
+    kind: 'side',
+    title: "The Professor's Lecture",
+    reward: 260,
+    intro: [
+      ['Marina', 'Dario — Professor Anselm, astronomy, Solana Heights. His car died at the library and his own lecture starts without him.'],
+      ['Marina', 'Collect him at the University Library and bring him to me at the café. He gives the talk here. Do not ask why.'],
+    ],
+    done: 'A lecture on the moons of Jupiter, delivered to a café. Port Solana is a strange and wonderful town.',
+    legTimer: 130,
+    route: [
+      {
+        key: 'library', label: 'University Library', r: 7,
+        text: 'Pick up Professor Anselm at the University Library',
+        say: [['Professor Anselm', 'You are the driver? Splendid. I am not late, the lecture is early. It is a question of frames of reference.']],
+      },
+      {
+        key: 'cafe', label: 'Café Solmar', r: 8,
+        text: 'Take the professor to Café Solmar — the clock is running',
+      },
+    ],
+  },
+  {
+    id: 'plates',
+    kind: 'side',
+    title: 'Glass Plates',
+    reward: 330,
+    intro: [
+      ['Marina', 'The observatory on the Heights photographed something last night. The plates go to a man at the airfield who pays not to be named.'],
+      ['Marina', 'Glass, Dario. Ninety-year-old glass. Collect them at the observatory, deliver them to the terminal — and arrive with them whole.'],
+    ],
+    done: 'Whole, every one. The man at the terminal counted them twice and smiled at neither of us.',
+    legTimer: 120,
+    route: [
+      {
+        key: 'observatory', label: 'Heights Observatory', r: 9,
+        text: 'Collect the photographic plates at the Heights Observatory',
+        say: [['Astronomer', 'Careful — if these break, the sky will have to do it again, and the sky does not repeat itself.']],
+      },
+      {
+        key: 'airport', label: 'Solana Airfield', r: 10,
+        text: 'Deliver the plates to Solana Airfield terminal — gently',
+      },
+    ],
+  },
+  {
+    id: 'derby',
+    kind: 'side',
+    title: 'Derby Day Loop',
+    reward: 420,
+    intro: [
+      ['Marina', 'Derby Day, Dario. Four flags, one loop of the whole town: the lighthouse, the marina, the clock tower on the Heights, then home to me.'],
+      ['Marina', 'No clock but your pride. The regulars have money on whether you finish before the ice melts.'],
+    ],
+    done: 'The ice had not even thought about melting. The regulars send their regards and their losses.',
+    route: [
+      {
+        key: 'lighthouse', label: 'Lighthouse', r: 14,
+        text: 'Derby Day — checkpoint 1: the lighthouse',
+        say: [['Dario', 'One flag down. The lighthouse keeper is waving, or warning me. Hard to tell.']],
+      },
+      {
+        key: 'marina', label: 'Solana Marina', r: 10,
+        text: 'Derby Day — checkpoint 2: the marina boardwalk',
+        say: [['Dario', 'Two. The fish market approves, or that was the smell of approval.']],
+      },
+      {
+        key: 'clocktower', label: 'The Clock Tower', r: 10,
+        text: 'Derby Day — checkpoint 3: the clock tower on the Heights',
+        say: [['Dario', 'Three. Twenty past four by the tower, and every minute of it earned.']],
+      },
+      {
+        key: 'cafe', label: 'Café Solmar', r: 8,
+        text: 'Derby Day — final leg: home to Café Solmar',
+      },
+    ],
+  },
+  {
+    id: 'reunion',
+    kind: 'side',
+    title: 'Old Friends',
+    reward: 310,
+    legTimer: 145,
+    intro: [
+      ['Marina', 'My sister Ines lands in twenty minutes. Twenty years we have not spoken, and she picks today — when my car smells of fish market.'],
+      ['Marina', 'Collect her at the terminal and take her to the Union Café on the Heights; she studied there. She will tell you I was the difficult one. I was not.'],
+    ],
+    done: 'She stayed two hours. Two. Whatever you said in that car, driver — the tab is mine, and so is the thanks.',
+    route: [
+      {
+        key: 'airport', label: 'Solana Airfield Terminal', r: 12,
+        text: 'Collect Ines at the airfield terminal',
+        say: [['Ines', 'You are Marina\u2019s driver? She said you were reliable and quiet. One of those was a lie she needed.']],
+      },
+      {
+        key: 'union', label: 'Union Café', r: 9,
+        text: 'Take Ines to the Union Café on the Heights',
+      },
+    ],
+  },
+];
+
 export class Missions {
   constructor(gl, world, hooks) {
     this.world = world;
@@ -103,8 +215,11 @@ export class Missions {
 
   get currentDef() {
     if (!this.active) return null;
-    // encore runs carry their own generated def (defIndex -1)
-    return this.active.defIndex >= 0 ? MISSION_DEFS[this.active.defIndex] : this.encoreDef;
+    // encore runs carry their own generated def (defIndex -1) and side
+    // jobs carry an authored one from SIDE_DEFS (defIndex -2)
+    if (this.active.defIndex >= 0) return MISSION_DEFS[this.active.defIndex];
+    if (this.active.defIndex === -2) return this.sideDef;
+    return this.encoreDef;
   }
 
   marker() {
@@ -119,6 +234,7 @@ export class Missions {
         : '';
     }
     const def = this.currentDef;
+    if (def.kind === 'side') return def.route[this.active.stage].text;
     if (this.active.stage === 0) return def.objective;
     if (this.active.stage === 1) return def.objective2 || def.objective;
     return def.objective3 || def.objective;
@@ -126,7 +242,11 @@ export class Missions {
 
   startNext() {
     if (this.storyDone) {
-      this.startEncore();
+      // post-story work alternates: an authored side job, then a crate
+      // run, then the next side job — the town never quite runs dry
+      this.jobsSinceStory = (this.jobsSinceStory || 0) + 1;
+      if (this.jobsSinceStory % 2 === 0) this.startSideJob();
+      else this.startEncore();
       return;
     }
     if (this.index >= MISSION_DEFS.length) {
@@ -146,7 +266,7 @@ export class Missions {
   // pays a flat courier's rate against the ferry clock.
   startEncore() {
     const L = this.world.landmarks;
-    const spots = [L.docks, L.garage, L.airport, L.hangar, L.lighthouse, L.police, L.hospital, L.marina, L.fishmarket];
+    const spots = [L.docks, L.garage, L.airport, L.hangar, L.lighthouse, L.police, L.hospital, L.marina, L.fishmarket, L.university, L.library, L.observatory, L.clocktower, L.union];
     const pick = spots[Math.floor(Math.random() * spots.length)];
     let drop = spots[Math.floor(Math.random() * spots.length)];
     if (drop === pick) drop = spots[(spots.indexOf(pick) + 3) % spots.length];
@@ -165,6 +285,18 @@ export class Missions {
     };
     this.active = { defIndex: -1, stage: 0, timer: null, target: null, pickup: pick, drop };
     this.hooks.showStory(this.encoreDef.intro);
+    this.setStageTarget();
+  }
+
+  // An authored side job from SIDE_DEFS, taken in rotation. The def is
+  // shared and never mutated; all running state lives on this.active.
+  startSideJob() {
+    if (this.sideIndex === undefined) this.sideIndex = 0;
+    const def = SIDE_DEFS[this.sideIndex % SIDE_DEFS.length];
+    this.sideIndex += 1;
+    this.sideDef = def;
+    this.active = { defIndex: -2, stage: 0, timer: null, target: null };
+    this.hooks.showStory(def.intro);
     this.setStageTarget();
   }
 
@@ -190,6 +322,10 @@ export class Missions {
         ? { ...a.pickup, label: a.pickup.name }
         : { ...a.drop, label: a.drop.name };
     }
+    else if (def.kind === 'side') {
+      const leg = def.route[a.stage];
+      a.target = { ...L[leg.key], label: leg.label };
+    }
     this.placeBeacon();
   }
 
@@ -206,16 +342,23 @@ export class Missions {
   finishMission() {
     const def = this.currentDef;
     const encore = def.id === 'encore';
+    const side = def.kind === 'side';
     this.hooks.showStory([['Marina', def.done]]);
-    this.hooks.onReward(def.reward, def.title);
+    // a side job beaten against its own clock pays a punctuality bonus
+    // on top — a dollar a second left standing, rounded generously
+    const bonus = side && this.active.timer > 0 ? Math.ceil(this.active.timer) : 0;
+    this.hooks.onReward(def.reward + bonus, bonus > 0 ? `${def.title} (+$${bonus} early)` : def.title);
     this.active = null;
-    if (!encore) this.index += 1; // encore runs do not advance the story
+    if (!encore && !side) this.index += 1; // side work does not advance the story
     this.completedCount += 1;
     this.placeBeacon();
     this.hooks.saveGame();
     if (encore) {
       // side work never runs out: another crate turns up before long
       this.nextJobIn = 9;
+    } else if (side) {
+      // and an authored errand is never the last of its kind either
+      this.nextJobIn = 8;
     } else if (this.index < MISSION_DEFS.length) {
       // the next job arrives a few seconds later, by phone
       this.nextJobIn = 6;
@@ -252,7 +395,9 @@ export class Missions {
           ? 'The flight left without you. The crate is back at the terminal — drive up and try again.'
           : def.id === 'encore'
             ? 'The ferry left without it. The crate is back where you found it — the fare stands, if you still want it.'
-            : 'Too slow — the tide turned. The package is back at the docks.';
+            : def.kind === 'side'
+              ? 'Too slow — the moment passed. The job starts again from the top, if you still want it.'
+              : 'Too slow — the tide turned. The package is back at the docks.';
         this.hooks.showStory([['Marina', line]]);
         return;
       }
@@ -332,6 +477,24 @@ export class Missions {
         this.hooks.showStory([['Dario', 'Another crate, another ferry to beat. Some things never change.']]);
       } else if (a.stage === 1 && near(a.target, 9)) {
         this.finishMission();
+      }
+    }
+    if (def.kind === 'side') {
+      // one generic walker for every authored route: arrive inside the
+      // leg's radius, hear what the leg has to say, and either roll on
+      // to the next leg (the leg clock starts now, if the job has one)
+      // or finish the job at the route's end
+      const leg = def.route[a.stage];
+      if (near(a.target, leg.r)) {
+        if (a.stage >= def.route.length - 1) {
+          this.finishMission();
+          return;
+        }
+        if (leg.say) this.hooks.showStory(leg.say);
+        a.stage += 1;
+        a.timer = def.legTimer || null;
+        this.setStageTarget();
+        if (this.hooks.onCheckpoint) this.hooks.onCheckpoint();
       }
     }
   }

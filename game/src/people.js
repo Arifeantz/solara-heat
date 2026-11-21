@@ -34,8 +34,11 @@ function ballMesh(gl, r, colorHex, key) {
   return meshCache.get(k);
 }
 
+const PACKS = [0xbc4749, 0x457b9d, 0xe9c46a, 0x606c38, 0x843b62, 0x2a9d8f];
+
 export class Person {
   constructor(gl, opts = {}) {
+    this.gl = gl;
     const rng = new Rng(opts.seed || 1);
     this.skin = opts.skin ?? rng.pick(SKIN);
     this.shirt = opts.shirt ?? rng.pick(SHIRTS);
@@ -88,7 +91,27 @@ export class Person {
     this.armR = mkLimb(partMesh(gl, 0.15, 0.6, 0.17, this.shirt, 'arm'), 0.36, 0.55, 0);
     this.legL = mkLimb(partMesh(gl, 0.19, 0.95, 0.21, this.pants, 'leg'), -0.14, 0.02, 0);
     this.legR = mkLimb(partMesh(gl, 0.19, 0.95, 0.21, this.pants, 'leg'), 0.14, 0.02, 0);
+    if (opts.backpack !== undefined && opts.backpack !== null) {
+      this.wearBackpack(opts.backpack);
+    }
     this.syncObj(0);
+  }
+
+  // A pack on the back: body, a flap in the shirt's colour, and one
+  // strap over the right shoulder. Students wear them; so does anyone
+  // the shore path gives a long walk home.
+  wearBackpack(colorHex) {
+    const gl = this.gl;
+    const pack = new Obj(partMesh(gl, 0.4, 0.52, 0.2, colorHex, 'pack'));
+    pack.pos = [0, 0.34, -0.28];
+    this.hips.add(pack);
+    const flap = new Obj(partMesh(gl, 0.34, 0.2, 0.22, this.shirt, 'packflap'));
+    flap.pos = [0, 0.52, -0.28];
+    this.hips.add(flap);
+    const strap = new Obj(partMesh(gl, 0.09, 0.55, 0.05, colorHex, 'strap'));
+    strap.pos = [0.17, 0.5, 0.19];
+    strap.rot = [0, 0, 0.5];
+    this.hips.add(strap);
   }
 
   syncObj(dt) {
@@ -172,6 +195,15 @@ export class Pedestrians {
         person.kind = 'chatter';
       } else if (roll < 0.56) {
         person.kind = 'tourist';
+      } else if (roll < 0.74) {
+        // a student of the Heights, pack on their back, in no hurry
+        // the city's pavements have ever managed to cure
+        person.kind = 'student';
+        person.walkSpeed = this.rng.range(1.2, 1.8);
+        person.wearBackpack(this.rng.pick(PACKS));
+      }
+      if (person.kind !== 'student' && this.rng.chance(0.16)) {
+        person.wearBackpack(this.rng.pick(PACKS));
       }
       person.pauseIn = this.rng.range(7, 22); // seconds until the next stop
       person.pauseLeft = 0; // seconds left in the current stop
@@ -249,12 +281,14 @@ export class Pedestrians {
         p.syncObj(dt);
         continue;
       }
-      if (p.kind === 'chatter' || p.kind === 'tourist') {
+      if (p.kind === 'chatter' || p.kind === 'tourist' || p.kind === 'student') {
         p.pauseIn -= dt;
         if (p.pauseIn <= 0) {
           p.pauseLeft = p.kind === 'tourist'
             ? this.rng.range(1.6, 3.0)
-            : this.rng.range(2.2, 4.5);
+            : p.kind === 'student'
+              ? this.rng.range(2.6, 5.2) // a chapter ends when it ends
+              : this.rng.range(2.2, 4.5);
           p.speed = 0;
           p.syncObj(dt);
           continue;

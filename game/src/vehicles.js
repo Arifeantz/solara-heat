@@ -21,6 +21,7 @@ export const CAR_TYPES = {
   buggy: { length: 3.6, width: 1.85, bodyH: 0.5, cabinH: 0.42, maxSpeed: 34, accel: 16, name: 'Dune Buggy' },
   pickup: { length: 4.9, width: 1.95, bodyH: 0.72, cabinH: 0.58, maxSpeed: 28, accel: 12, name: 'Rancher Pickup' },
   taxi: { length: 4.4, width: 1.9, bodyH: 0.62, cabinH: 0.52, maxSpeed: 30, accel: 12, name: 'Solana Cab' },
+  limo: { length: 6.6, width: 2.0, bodyH: 0.6, cabinH: 0.5, maxSpeed: 27, accel: 9.5, name: 'Regent Limo' },
 };
 
 const TRAFFIC_COLORS = [0xe8e3d8, 0xc0c6cc, 0x8fb8c9, 0xd97b6c, 0x7fae7a, 0xe3c878, 0x9a86c8, 0x565d66, 0xf2f0eb, 0x74a7a0];
@@ -64,6 +65,18 @@ function buildCarObject(gl, type, colorHex, isPolice) {
     for (const lx of [-0.25, 0, 0.25]) {
       b.box(lx * W, bodyY + 0.55, L * 0.48, 0.2, 0.11, 0.05, hexColor(0xfff2c0));
     }
+  } else if (type === 'limo') {
+    // the Regent: a sedan stretched past politeness — a long glasshouse
+    // split by a body-colour pillar band where the partition sits, a
+    // chrome waist strip, and a little flag mast on the front wing for
+    // whoever is important enough to need one this week
+    const cabBase = bodyY + spec.bodyH / 2;
+    b.box(0, cabBase + spec.cabinH / 2 - 0.04, -L * 0.05, W * 0.84, spec.cabinH, L * 0.62, glass);
+    b.box(0, cabBase + spec.cabinH - 0.06, -L * 0.05, W * 0.88, 0.09, L * 0.66, body); // the long roof
+    b.box(0, cabBase + spec.cabinH / 2 - 0.04, -L * 0.05, W * 0.86, spec.cabinH, 0.34, body); // partition band
+    b.box(0, bodyY + 0.1, 0, W * 1.01, 0.09, L * 0.96, hexColor(0xc8ced2)); // chrome waist
+    b.cylinder(W * 0.42, bodyY + 0.62, L * 0.4, 0.025, 0.025, 0.62, 5, hexColor(0xc8ced2)); // flag mast
+    b.box(W * 0.42, bodyY + 0.86, L * 0.4, 0.05, 0.2, 0.34, hexColor(0x0e7c86)); // the little flag
   } else if (type === 'pickup') {
     // a working pickup: a proper cab over the front third, then an open
     // bed with side walls and a tailgate — and the spare wheel riding in
@@ -221,7 +234,7 @@ export class TrafficSystem {
     // moving traffic, started on avenues near intersections
     for (let i = 0; i < count; i++) {
       const node = this.rng.pick(intersections);
-      const type = this.rng.pick(['sedan', 'sedan', 'hatch', 'taxi', 'van', 'sport', 'buggy', 'pickup']);
+      const type = this.rng.pick(['sedan', 'sedan', 'hatch', 'taxi', 'van', 'sport', 'buggy', 'pickup', 'limo']);
       const color = type === 'taxi' ? 0xf7b731 : this.rng.pick(TRAFFIC_COLORS);
       const car = new Car(gl, type, color, node.x, node.z, 0, { driver: 'traffic' });
       car.fromNode = node;
@@ -229,10 +242,11 @@ export class TrafficSystem {
       car.speed = 6;
       this.cars.push(car);
     }
-    // parked cars in the lots and along a few curbs
+    // parked cars in the lots and along a few curbs (a limo only ever
+    // parks where somebody is being waited for: the café, the terminal)
     for (const spot of world.parkedSpots) {
       if (this.rng.chance(0.35)) continue;
-      const type = this.rng.pick(['sedan', 'hatch', 'van', 'sport', 'buggy', 'pickup']);
+      const type = this.rng.pick(['sedan', 'hatch', 'van', 'sport', 'buggy', 'pickup', 'limo']);
       const car = new Car(gl, type, this.rng.pick(TRAFFIC_COLORS), spot.x, spot.z, spot.heading, { driver: 'parked' });
       this.cars.push(car);
     }

@@ -65,7 +65,29 @@ seconds later. The five jobs pay $50, $180, $350, $600 and $800:
   free roam — and Marina's phone still rings: the **Encore Runs** are
   endless side jobs that send you to collect a crate at one landmark
   (the docks, the airfield, the marina, the lighthouse…) and deliver it
-  to another against a 150-second ferry clock, $150 a run.
+  to another against a 150-second ferry clock, $150 a run. They rotate
+  with four authored **Side Jobs**: *The Professor's Lecture* (collect
+  Professor Anselm at the University Library on the Heights and get him
+  to the café against the clock), *Glass Plates* (carry ninety-year-old
+  photographic plates from the Heights Observatory to the airfield
+  terminal, whole), the *Derby Day Loop* (four checkpoints —
+  lighthouse, marina, the clock tower on the Heights, home — with the
+  whole town watching the ice melt), and *Old Friends* (Marina's sister
+  Ines, twenty years estranged, collected at the terminal and taken to
+  the Union Café where she once studied). Beating a Side Job's clock
+  pays a punctuality bonus, a dollar a second.
+
+**Work the CabCo phone.** Marina's jobs are the story; the rent is
+yours to earn. Behind any wheel, press **T** and the CabCo dispatch
+answers: a named passenger is waiting at a named landmark, waving at
+the kerb. Stop beside them and they climb in; drive them home before
+their patience — the meter on screen — runs out. The fare is distance
+money, and the tip rides on top of it: full at the start of the ride,
+bleeding away with the clock, and gone entirely if you terrify them
+(a quarter of the car's health in dents will do it) or let the
+patience die. Passengers are brave about many things, but a three-star
+drop-off keeps its tip for bail money. Get busted or wasted mid-fare
+and the fare is simply lost — dispatch notes the silence.
 
 **Mind the heat.** Almost everything fun is an offence, and offences feed
 a heat score that turns into one to five stars: stealing a car (worse if
@@ -75,7 +97,11 @@ offence of all — running a pedestrian down. One cruiser answers per
 star, up to five. Cruisers hunt the last place an officer actually saw
 you and share their sightings, so break line of sight behind the towers
 and stay clean: after a few hidden seconds with no fresh offence, the
-heat drains and the stars fall away.
+heat drains and the stars fall away. At four stars the SPD changes
+tactics: two cruisers park nose-to-nose across an intersection ahead
+of you — a **roadblock**. It brakes traffic, its officers' eyes still
+report you, and ramming it is exactly as bad an idea as it sounds. It
+stands down when the heat falls below three stars.
 
 **Don't get cornered.** If a cruiser stays close while you are on foot
 or nearly stopped, the bust meter fills in about two and a half seconds.
@@ -103,7 +129,20 @@ start outside its doors.
   boardwalk, finger piers, five moored sailboats and a working fishing
   boat, a fish market under striped canopies, and channel buoys that
   ride the swell. The lagoon is solid to cars — nobody parks in the
-  harbour twice.
+  harbour twice. A dock crane leans over the third pier with a crate
+  hanging from its cable, and lobster pots wait by the market for the
+  evening tide.
+- Solana Heights on the west shore: the university quarter, reached by
+  its own coast road under a gateway arch. A main hall with a columned
+  portico and a prism pediment, a brick library, a lecture hall, a quad
+  with a breathing fountain and a bronze founder pointing at the sea,
+  a thirty-metre clock tower that insists it is twenty past four, two
+  dormitories on their own green, the Union Café, tennis courts, and —
+  on the north rise — an observatory whose dome still turns, telescope
+  and all. Students pace the quad square with packs on their backs.
+- A medevac helicopter on the airfield helipad, its rotor turning at
+  idle, and bus stops on three avenue corners — shelter, bench, and a
+  yellow flag for a bus that is, by all accounts, a rumour.
 - Traffic that drives the avenue grid in right-hand lanes and brakes for
   what's ahead; pedestrians strolling every sidewalk who flee from
   trouble — and, on quieter streets, jog their loops, stop to take phone
@@ -133,8 +172,11 @@ start outside its doors.
 | F or click | punch |
 | Shift | run |
 | Space | brake |
+| T | CabCo fare (in a car) |
+| C | render quality (full / balanced / light) |
 | P | pause |
 | M | mute |
+| Gamepad | left stick walk/steer, triggers drive, right stick camera, A = E, X = punch, Y = phone, B = brake, Start = pause |
 
 ## How it's built
 
@@ -146,13 +188,20 @@ The city is generated from a fixed seed (`city.js`) and baked into merged
 meshes; the airfield is a second seeded builder (`airport.js`) whose
 colliders, landmarks, parking spots and sidewalk loops fold into the same
 world object, and the marina (`marina.js`) folds in the same way again,
-borrowing the airfield's geometry-merge helper. The other systems each
-own one file: `vehicles.js` (cars, traffic, driving), `people.js` (the
-player and pedestrians), `police.js` (wanted level and pursuit),
-`missions.js` (Marina's five jobs, plus the endless Encore Runs that
-follow them), `hud.js` (HUD and minimap — the airfield and the marina
-are painted onto it), `audio.js`, `input.js`, and `main.js` to wire it
-together.
+borrowing the airfield's geometry-merge helper. The university quarter
+(`university.js`) is a fourth builder in the same shape — its own brick
+texture, its own seeded shore — and the CabCo dispatcher (`taxi.js`) is
+a guest system that borrows the landmark table for its address book and
+a pedestrian for its passenger. The other systems each own one file:
+`vehicles.js` (cars, traffic, driving — seven body types now, the
+Regent Limo among them), `people.js` (the player and pedestrians,
+students and backpacks included), `police.js` (wanted level, pursuit,
+and the four-star roadblock), `missions.js` (Marina's five jobs, the
+endless Encore Runs, and the four authored Side Jobs that rotate with
+them), `hud.js` (HUD and minimap — the airfield, the marina and the
+Heights are painted onto it, and the target's name is lettered beside
+its diamond), `audio.js`, `input.js` (keyboard, mouse, and a
+standard-mapping gamepad), and `main.js` to wire it together.
 
 `main.ts` at the repository root is the entry program for the bounty: it
 copies `game/` and `screenshots/` to the output directory and writes the

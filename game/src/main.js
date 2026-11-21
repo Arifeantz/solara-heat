@@ -10,10 +10,12 @@
 // scene for screenshots; it plays by exactly the same rules as the game.
 
 import { Renderer, Obj, GeoBuilder, hexColor, Mat4 } from './engine.js';
-import { facadeTexture, shopTexture, asphaltTexture, sandTexture, glowTexture } from './textures.js';
+import { facadeTexture, shopTexture, asphaltTexture, sandTexture, glowTexture, brickTexture } from './textures.js';
 import { buildCity, GRID_LINES } from './city.js';
 import { buildAirport } from './airport.js';
 import { buildMarina } from './marina.js';
+import { buildUniversity } from './university.js';
+import { CabCo } from './taxi.js';
 import { Car, TrafficSystem, drivePlayerCar, carCarImpact } from './vehicles.js';
 import { Person, Pedestrians, Player } from './people.js';
 import { WantedSystem, PoliceSystem, losBlocked } from './police.js';
@@ -35,6 +37,7 @@ const textures = {
   asphalt: renderer.makeTexture(asphaltTexture()),
   sand: renderer.makeTexture(sandTexture()),
   glow: renderer.makeTexture(glowTexture()),
+  brick: renderer.makeTexture(brickTexture()),
 };
 
 const world = buildCity(renderer.gl, textures);
@@ -53,10 +56,18 @@ world.colliders.push(...marina.colliders);
 Object.assign(world.landmarks, marina.landmarks);
 world.parkedSpots.push(...marina.parkedSpots);
 world.sidewalkLoops.push(...marina.sidewalkLoops);
+// Solana Heights on the west shore, folded in last so its landmarks
+// join the address books the missions and the CabCo dispatcher read
+const heights = buildUniversity(renderer.gl, textures);
+world.colliders.push(...heights.colliders);
+Object.assign(world.landmarks, heights.landmarks);
+world.parkedSpots.push(...heights.parkedSpots);
+world.sidewalkLoops.push(...heights.sidewalkLoops);
 const scene = new Obj();
 scene.add(world.group);
 scene.add(airport.group);
 scene.add(marina.group);
+scene.add(heights.group);
 
 const traffic = new TrafficSystem(renderer.gl, world, 14);
 const peds = new Pedestrians(renderer.gl, world, 26);
@@ -125,14 +136,42 @@ const missions = new Missions(renderer.gl, world, {
   onStoryDone: () => {
     hud.toast('Story complete — Port Solana is yours. Free roam!');
   },
+  onCheckpoint: () => {
+    audio.checkpoint();
+  },
   saveGame: () => saveGame(),
 });
 addToScene(missions.beacon);
 addToScene(missions.beaconRing);
 
+// ------------------------------------------------------------ CabCo fares
+// The dispatch system rides on the same world: its address book is the
+// landmark table (the Heights included, since the merge ran first), its
+// passenger is a Person the scene helpers place, and its money lands in
+// the same pocket Marina's rewards do.
+const taxi = new CabCo(renderer.gl, world, {
+  showStory: (lines) => hud.showStory(lines),
+  toast: (text) => hud.toast(text),
+  addToScene: (obj) => addToScene(obj),
+  removeFromScene: (obj) => removeFromScene(obj),
+  ringPhone: () => audio.phoneRing(),
+  doorSlam: () => audio.door(),
+  onFare: (total, fare, tip) => {
+    player.money += total;
+    audio.cash();
+    audio.fareChime();
+    hud.toast(tip > 0
+      ? 'CabCo fare paid — $' + fare + ' + $' + tip + ' tip'
+      : 'CabCo fare paid — $' + fare + ' (no tip)');
+  },
+});
+
 // ------------------------------------------------------------ state
 let state = 'menu';
 let now = 0;
+const QUALITY_STEPS = [1, 0.75, 0.55];
+const QUALITY_NAMES = ['full', 'balanced', 'light'];
+let qualityStep = 0;
 let orbitAngle = 0;
 let playerDownTimer = 0;
 let speedTrapCooldown = 0;
@@ -202,6 +241,7 @@ function startGame(fresh) {
 
 function endRun(kind) {
   state = kind;
+  taxi.cancel(true); // a passenger does not ride to the station or the hospital
   document.exitPointerLock && document.exitPointerLock();
   const fine = kind === 'busted'
     ? Math.min(player.money, 100 + wanted.stars * 60)
@@ -228,6 +268,7 @@ function respawn() {
   wanted.bustProgress = 0;
   for (const c of police.cars) removeFromScene(c.obj);
   police.cars.length = 0;
+  police.roadblock.length = 0; // the wall comes down with the heat
   police.lastKnown = null;
   state = 'playing';
   saveGame();
@@ -399,6 +440,13 @@ function frame(nowMs) {
     }
   }
   if (input.tap('KeyM')) audio.setMuted(!audio.muted);
+  if (input.tap('KeyT')) taxi.requestFare();
+  if (input.tap('KeyC')) {
+    // render quality cycles full → balanced → light, for weak GPUs
+    qualityStep = (qualityStep + 1) % QUALITY_STEPS.length;
+    renderer.setQuality(QUALITY_STEPS[qualityStep]);
+    hud.toast('Render quality: ' + QUALITY_NAMES[qualityStep]);
+  }
 
   // ---- world life
   const obstacles = [...traffic.cars, ...police.cars];
@@ -497,6 +545,11 @@ function frame(nowMs) {
     audio.setEngine(0, 0, false);
   }
 
+  // a driver with an empty cab and a quiet phone gets the CabCo prompt
+  if (!prompt && player.inCar && taxi.state === 'idle' && taxi.cooldown <= 0) {
+    prompt = 'T — CabCo: take a fare';
+  }
+
   // ---- police and the law
   const seen = police.update(dt, { x: pp.x, z: pp.z }, wanted, world.colliders, now);
   wanted.update(dt, seen, now);
@@ -546,6 +599,15 @@ function frame(nowMs) {
     now,
   });
 
+  // ---- CabCo: the passenger waits, rides, judges, pays
+  taxi.update(dt, {
+    x: pp.x, z: pp.z,
+    inCar: !!player.inCar,
+    car: player.inCar,
+    wanted: wanted.stars,
+    now,
+  });
+
   // ---- clouds drift, sea breathes
   for (const c of clouds) {
     c.pos[0] += dt * 1.1;
@@ -554,6 +616,7 @@ function frame(nowMs) {
   world.sea.emissive = 0.1 + Math.sin(now * 0.7) * 0.03;
   airport.update(now);
   marina.update(now);
+  heights.update(now);
 
   // ---- camera
   const focus = player.inCar ? player.inCar : player;
@@ -585,12 +648,12 @@ function frame(nowMs) {
     seenByPolice: seen,
     health: player.health,
     speedKmh: player.inCar ? Math.abs(player.inCar.speed) * 3.6 : null,
-    objective: missions.objectiveText(),
-    timer: missions.timeLeft(),
+    objective: taxi.objectiveText() || missions.objectiveText(),
+    timer: taxi.timeLeft() !== null ? taxi.timeLeft() : missions.timeLeft(),
     bust: wanted.bustProgress,
     prompt,
     player: { x: pp.x, z: pp.z, heading: player.inCar ? player.inCar.heading : player.heading },
-    target: missions.marker(),
+    target: taxi.marker() || missions.marker(),
     police: police.cars,
     cars: traffic.cars.slice(0, 18),
   });
@@ -608,4 +671,7 @@ function frame(nowMs) {
 requestAnimationFrame(frame);
 
 // used by the screenshot harness: true once the staged scene is live
-window.__solara = { get state() { return state; }, player, wanted, missions };
+// the debug handle: the state, the player, and the live systems — the
+// world and its traffic included, so a test (or a curious player in the
+// console) can see the whole town's wiring from one place
+window.__solara = { get state() { return state; }, player, wanted, missions, taxi, world, traffic, police };

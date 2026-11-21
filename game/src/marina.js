@@ -190,6 +190,31 @@ export function buildMarina(gl, textures) {
     plain.box(rx + 1.4, 0.14, rz + 0.6, 1.6, 0.16, 1.2, hexColor(0x39543f));
   }
 
+  // ---- the dock crane at the end of the third pier: a post, a jib
+  // leaned out over the water, and a crate of something heavy hanging
+  // at the end of its cable, halfway to the fishing boat's deck
+  {
+    const cx = 276.5, cz = 90;
+    plain.cylinder(cx, 2.2, cz, 0.22, 0.3, 4.4, 8, hexColor(0x8a4b2a));
+    const jib = new GeoBuilder();
+    jib.box(0, 0, 0, 0.3, 0.3, 6.4, hexColor(0x8a4b2a));
+    mergeGeo(plain, jib, Mat4.compose(cx + 1.4, 4.9, cz, 0, Math.PI / 2, 0.5, 1, 1, 1));
+    plain.box(cx + 3.6, 3.4, cz, 0.05, 2.6, 0.05, darkMetal); // the cable
+    plain.box(cx + 3.6, 1.9, cz, 1.5, 1.1, 1.5, hexColor(0xb08968)); // the load
+    plain.box(cx - 1.2, 4.1, cz, 0.9, 0.8, 0.9, darkMetal); // counterweight
+    colliders.push({ minX: cx - 0.5, maxX: cx + 0.5, minZ: cz - 0.5, maxZ: cz + 0.5 });
+  }
+
+  // lobster pots waiting for the evening tide: tapered cylinders of
+  // slatted wood, stacked in threes by the market and the north pier
+  for (const [px, pz] of [[253.6, 100], [257.2, 84], [254.8, -36]]) {
+    for (let i = 0; i < 3; i++) {
+      plain.cylinder(px + (i === 2 ? 0.3 : 0), 0.28 + (i === 2 ? 0.56 : i * 0.28), pz + (i === 1 ? 0.4 : 0),
+        0.42, 0.55, 0.5, 8, hexColor(i % 2 ? 0x9a7d52 : 0x7d6543));
+    }
+    plain.cylinder(px, 1.05, pz, 0.09, 0.09, 0.35, 6, hexColor(0xe4572e)); // the pot buoy
+  }
+
   landmarks.marina = { x: 250, z: 40, name: 'Solana Marina' };
   landmarks.fishmarket = { x: 250, z: 116, name: 'Marina Fish Market' };
 

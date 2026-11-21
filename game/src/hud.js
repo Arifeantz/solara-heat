@@ -94,6 +94,34 @@ export class Hud {
     const [wx1, wz1] = this.worldToMap(260, 144, size);
     g.fillStyle = '#a98f66';
     g.fillRect(wx0, wz0, wx1 - wx0, wz1 - wz0);
+    // Solana Heights on the west shore: its grass strip, the coast road
+    // as one dark line, and the quad as a pale green square a student
+    // could navigate by
+    const [hx0, hz0] = this.worldToMap(-300, -218, size);
+    const [hx1, hz1] = this.worldToMap(-252, 218, size);
+    g.fillStyle = '#7d9b6a';
+    g.fillRect(hx0, hz0, hx1 - hx0, hz1 - hz0);
+    const [hrx] = this.worldToMap(-265, 0, size);
+    g.strokeStyle = '#5a5a60';
+    g.lineWidth = 3;
+    g.beginPath(); g.moveTo(hrx, hz0); g.lineTo(hrx, hz1); g.stroke();
+    const [qx0, qz0] = this.worldToMap(-295, -72, size);
+    const [qx1, qz1] = this.worldToMap(-270, -12, size);
+    g.fillStyle = '#93b184';
+    g.fillRect(qx0, qz0, qx1 - qx0, qz1 - qz0);
+    // district names, lettered small and plain like a paper map's —
+    // a legend the eye reads once and then navigates by forever
+    g.fillStyle = 'rgba(20, 34, 40, 0.55)';
+    g.font = '700 10px "Avenir Next", "Segoe UI", sans-serif';
+    g.textAlign = 'center';
+    const label = (x, z, text) => {
+      const [lx, lz] = this.worldToMap(x, z, size);
+      g.fillText(text, lx, lz);
+    };
+    label(0, -306, 'SOLANA AIRFIELD');
+    label(282, 150, 'MARINA');
+    label(-282, 226, 'SOLANA HEIGHTS');
+    label(-208, 30, 'DOCKS');
     return c;
   }
 
@@ -181,7 +209,9 @@ export class Hud {
       g.fillStyle = phase ? '#3b82f6' : '#ef4444';
       g.beginPath(); g.arc(x, z, 3, 0, 7); g.fill();
     }
-    // mission target: a gold diamond that breathes
+    // mission target: a gold diamond that breathes, with its name
+    // lettered beside it when the def gave it one — a passenger's name
+    // reads differently from a place's, and both are worth knowing
     if (s.target) {
       const [x, z] = this.worldToMap(s.target.x, s.target.z, size);
       const r = 4.5 + Math.sin(performance.now() / 240) * 1.2;
@@ -191,6 +221,14 @@ export class Hud {
       g.rotate(Math.PI / 4);
       g.fillRect(-r / 1.4, -r / 1.4, r * 1.4, r * 1.4);
       g.restore();
+      if (s.target.label) {
+        g.font = '700 10px "Avenir Next", "Segoe UI", sans-serif';
+        g.textAlign = x > size - 70 ? 'right' : 'left';
+        g.fillStyle = 'rgba(0,0,0,0.55)';
+        g.fillText(s.target.label, x + (g.textAlign === 'right' ? -8 : 8) + 1, z + 4);
+        g.fillStyle = '#ffd968';
+        g.fillText(s.target.label, x + (g.textAlign === 'right' ? -8 : 8), z + 3);
+      }
     }
     // the player: a white arrow pointing the way he faces
     const [px, pz] = this.worldToMap(s.player.x, s.player.z, size);

@@ -82,6 +82,44 @@ export class PoliceSystem {
     this.lastKnown = null;
     this.lastKnownAt = -99;
     this.spawnCooldown = 0;
+    this.roadblock = []; // cruisers parked across a road, driver 'roadblock'
+    this.roadblockCooldown = 18; // the first one takes a while to organise
+  }
+
+  // Two cruisers parked nose-to-nose across an intersection ahead of
+  // the player: not a pursuit, a wall. They sit in this.cars like any
+  // cruiser — traffic brakes for them, ramming one is an offence, and
+  // their eyes report sightings — but they never start their engines.
+  setRoadblock(player) {
+    const options = intersections.filter((n) => {
+      const d = dist2d(player.x, player.z, n.x, n.z);
+      return d > 55 && d < 115;
+    });
+    if (!options.length) return;
+    const node = this.rng.pick(options);
+    // across the east–west avenue through the node, angled like a
+    // barrier that was placed in a hurry by people being shouted at
+    const spots = [
+      { x: node.x - 2.4, z: node.z + 1.6, heading: Math.PI / 2 + 0.42 },
+      { x: node.x + 2.4, z: node.z - 1.6, heading: Math.PI / 2 - 0.38 },
+    ];
+    for (const s of spots) {
+      const car = new Car(this.gl, 'sedan', 0xffffff, s.x, s.z, s.heading, { police: true, driver: 'roadblock' });
+      car.speed = 0;
+      this.cars.push(car);
+      this.roadblock.push(car);
+    }
+    this.roadblockCooldown = 45;
+  }
+
+  clearRoadblock() {
+    for (const car of this.roadblock) {
+      car.obj.visible = false;
+      const i = this.cars.indexOf(car);
+      if (i >= 0) this.cars.splice(i, 1);
+    }
+    this.roadblock = [];
+    this.roadblockCooldown = 30;
   }
 
   desiredCount(stars) {
@@ -111,9 +149,11 @@ export class PoliceSystem {
       this.spawnCooldown = 2.5;
     }
     if (this.cars.length > target) {
-      // the farthest cruiser gives up and peels away
+      // the farthest hunting cruiser gives up and peels away (a
+      // roadblock car is a wall, not a hunter: it never peels)
       let far = null, fd = -1;
       for (const c of this.cars) {
+        if (c.driver === 'roadblock') continue;
         const d = dist2d(c.x, c.z, player.x, player.z);
         if (d > fd) { fd = d; far = c; }
       }
@@ -121,6 +161,16 @@ export class PoliceSystem {
         far.obj.visible = false;
         this.cars.splice(this.cars.indexOf(far), 1);
       }
+    }
+
+    // roadblocks: at four stars the SPD stops chasing one car at a time
+    // and starts closing the board; below three, the wall comes down
+    this.roadblockCooldown -= dt;
+    if (wanted.stars >= 4 && this.roadblock.length === 0 && this.roadblockCooldown <= 0) {
+      this.setRoadblock(player);
+    }
+    if (wanted.stars <= 2 && this.roadblock.length) {
+      this.clearRoadblock();
     }
 
     // shared eyes: if any cruiser sees the player, all know where he is
@@ -139,6 +189,10 @@ export class PoliceSystem {
     const memory = now - this.lastKnownAt < 6 ? this.lastKnown : null;
 
     for (const car of this.cars) {
+      if (car.driver === 'roadblock') {
+        car.syncObj(); // parked across the road: lights turning, engine off
+        continue;
+      }
       this.drivePolice(car, dt, player, memory, colliders);
     }
     return anySee;

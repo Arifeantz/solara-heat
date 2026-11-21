@@ -28,6 +28,36 @@ export class Rng {
   chance(p) {
     return this.next() < p;
   }
+  // Fisher–Yates, in place: returns the same list, shuffled by this
+  // stream. Decks of jobs and destinations draw from a shuffle so the
+  // same card cannot come up twice in a row by accident.
+  shuffle(list) {
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(this.next() * (i + 1));
+      const tmp = list[i];
+      list[i] = list[j];
+      list[j] = tmp;
+    }
+    return list;
+  }
+  // n distinct entries from a list, drawn without disturbing the list
+  sample(list, n) {
+    const copy = list.slice();
+    this.shuffle(copy);
+    return copy.slice(0, Math.max(0, Math.min(n, copy.length)));
+  }
+  // pick an index by weights (an array of non-negative numbers)
+  weighted(weights) {
+    let total = 0;
+    for (const w of weights) total += w;
+    if (total <= 0) return 0;
+    let roll = this.next() * total;
+    for (let i = 0; i < weights.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) return i;
+    }
+    return weights.length - 1;
+  }
 }
 
 export function clamp(v, lo, hi) {

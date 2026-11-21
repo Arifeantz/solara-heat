@@ -143,6 +143,38 @@ export class GameAudio {
   }
   horn() { this.tone(370, 0.18, 'square', 0.07); this.tone(466, 0.18, 'square', 0.05); }
 
+  // the CabCo phone: a two-tone warble, twice, the way a cheap handset
+  // rings in a hot car — dispatch calling with money on the line
+  phoneRing() {
+    for (const at of [0, 0.55]) {
+      for (let i = 0; i < 5; i++) {
+        this.tone(i % 2 ? 1180 : 1040, 0.07, 'square', 0.045, at + i * 0.09);
+      }
+    }
+  }
+
+  // the meter's little victory bell when a fare lands: two bright dings
+  // a semitone apart, then the cash register's answer underneath
+  fareChime() {
+    this.tone(1568, 0.12, 'sine', 0.09);
+    this.tone(1760, 0.2, 'sine', 0.09, 0.1);
+    this.tone(784, 0.16, 'triangle', 0.05, 0.12);
+  }
+
+  // a checkpoint blip for the Derby Day Loop and the side-job legs: one
+  // rising note, short enough to hear at speed through an open window
+  checkpoint() {
+    this.tone(740, 0.09, 'triangle', 0.12, 0, 1180);
+    this.tone(1180, 0.14, 'triangle', 0.1, 0.08);
+  }
+
+  // water against a hull: a soft, low wash of filtered noise, for the
+  // moments the game stands still by the marina and listens
+  splash() {
+    this.noise(0.5, 0.05, 420);
+    this.noise(0.35, 0.035, 300, 0.22);
+  }
+
   // a slow sun-drenched loop: Am7 — Fmaj7 — Cmaj7 — G, plucked pentatonic
   startMusic() {
     if (!this.ctx || this.musicTimer) return;

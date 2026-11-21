@@ -214,6 +214,41 @@ function buildFollowMe() {
   return b;
 }
 
+// The medevac helicopter that lives on the helipad: a glass bubble, a
+// slim tail boom, skids, and a red cross it wears without vanity. Built
+// at the origin, nose to +X; its rotor is a separate living object (see
+// the end of buildAirport) so the disc can turn at idle.
+function buildHelicopter() {
+  const b = new GeoBuilder();
+  const white = hexColor(0xf2f0eb);
+  const red = hexColor(0xd64545);
+  const glass = hexColor(0x1d2f3a);
+  const dark = hexColor(0x232a30);
+  // the cabin: a rounded box of glass over a white belly
+  b.box(0.4, 1.55, 0, 3.4, 1.5, 2.2, white);
+  b.box(1.35, 1.85, 0, 1.6, 1.1, 1.95, glass);
+  b.box(0.4, 0.85, 0, 3.0, 0.35, 1.9, red); // the belly stripe
+  // the cross on the cabin side, both sides, unmissable from the air
+  for (const s of [-1, 1]) {
+    b.box(-0.3, 1.7, s * 1.12, 0.75, 0.24, 0.06, red);
+    b.box(-0.3, 1.7, s * 1.12, 0.24, 0.75, 0.06, red);
+  }
+  // the tail boom runs back and slightly up to the fin and its rotor
+  b.box(-3.1, 1.95, 0, 3.6, 0.55, 0.6, white);
+  b.box(-5.0, 2.5, 0, 0.5, 1.5, 0.18, red);
+  b.box(-5.0, 2.6, 0.16, 0.34, 0.9, 0.08, dark); // tail rotor, at rest
+  // skids: two rails on four struts, the only landing gear it trusts
+  for (const s of [-1, 1]) {
+    tubeX(b, 0.2, 0.28, s * 0.95, 0.07, 3.6, dark);
+    for (const sx of [-0.9, 1.2]) {
+      b.box(sx, 0.62, s * 0.95, 0.12, 0.7, 0.12, dark);
+    }
+  }
+  // the mast the living rotor sits on
+  b.cylinder(0.3, 2.55, 0, 0.16, 0.2, 0.5, 8, dark);
+  return b;
+}
+
 // ------------------------------------------------------------ the airfield
 
 export function buildAirport(gl, textures) {
@@ -348,6 +383,10 @@ export function buildAirport(gl, textures) {
     plain.box(197.1, 0.16, -246, 0.8, 0.06, 3.6, white);
     plain.box(196, 0.16, -246, 1.4, 0.06, 0.8, white);
     landmarks.helipad = { x: 196, z: -234, name: 'Airfield Helipad' };
+    // the medevac helicopter sits on the H, nose to the sea wind; it is
+    // baked here, and its rotor joins the living objects below
+    mergeGeo(plain, buildHelicopter(), Mat4.compose(196, 0.1, -246, 0, -0.35, 0, 1, 1, 1));
+    colliders.push({ minX: 192.5, maxX: 199.5, minZ: -249.5, maxZ: -242.5 });
   }
 
   // ---- aircraft on the ground: the jet at its gate, the prop plane west
@@ -455,13 +494,18 @@ export function buildAirport(gl, textures) {
   addBaked(facade, textures.facade);
   addBaked(plain, null);
 
-  // ---- the two living details: a turning radar bar, a blinking beacon
+  // ---- the three living details: a turning radar bar, a blinking
+  // beacon, and the medevac rotor turning slowly at idle
   const radar = new Obj(new GeoBuilder().box(0, 0, 0, 7, 0.35, 0.9, hexColor(0xe8e4da)).build(gl));
   radar.pos = [140, 25.9, -230];
   group.add(radar);
   const beacon = new Obj(new GeoBuilder().box(0, 0, 0, 0.7, 0.5, 0.7, hexColor(0xff4444)).build(gl), { emissive: 1.2 });
   beacon.pos = [140, 26.9, -230];
   group.add(beacon);
+  const rotor = new Obj(new GeoBuilder().box(0, 0, 0, 8.6, 0.07, 0.5, hexColor(0x232a30)).build(gl));
+  rotor.pos = [196.3, 2.92, -245.9]; // over the mast of the baked helicopter
+  rotor.rot = [0, -0.35, 0];
+  group.add(rotor);
 
   return {
     group,
@@ -472,6 +516,7 @@ export function buildAirport(gl, textures) {
     update(now) {
       radar.rot[1] = now * 0.9;
       beacon.visible = now % 1.8 < 1.0;
+      rotor.rot[1] = -0.35 + now * 2.4;
     },
   };
 }

@@ -96,6 +96,49 @@ export function sandTexture() {
   return c;
 }
 
+// Old-town brickwork for the university quarter: warm red-brown courses
+// with pale mortar, a few bricks burnt darker, and the grime of a wall
+// that has stood by the sea for ninety years. One tile holds eight
+// courses; the builder scales its uv so the bricks stay brick-sized.
+export function brickTexture() {
+  const c = makeCanvas(256, 256);
+  const g = c.getContext('2d');
+  g.fillStyle = '#c8b8a2'; // mortar
+  g.fillRect(0, 0, 256, 256);
+  const courseH = 32; // eight courses per tile
+  const brickW = 62;
+  const tones = ['#a55a41', '#9c5138', '#b06244', '#8f4a34', '#a85f43', '#7e4230'];
+  let seed = 41;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  for (let row = 0; row < 256 / courseH; row++) {
+    const y = row * courseH;
+    const offset = row % 2 ? -brickW / 2 : 0; // running bond
+    for (let x = offset; x < 256; x += brickW) {
+      const tone = tones[Math.floor(rnd() * tones.length)];
+      g.fillStyle = tone;
+      g.fillRect(x + 2, y + 2, brickW - 4, courseH - 4);
+      // a kiln blush on the top face and wear along the bottom edge
+      g.fillStyle = 'rgba(255,220,180,0.16)';
+      g.fillRect(x + 2, y + 2, brickW - 4, 5);
+      g.fillStyle = 'rgba(40,20,10,0.20)';
+      g.fillRect(x + 2, y + courseH - 7, brickW - 4, 3);
+      if (rnd() < 0.12) {
+        g.fillStyle = 'rgba(30,26,24,0.35)';
+        g.fillRect(x + 6 + rnd() * 30, y + 6 + rnd() * 14, 12, 7);
+      }
+    }
+  }
+  // salt streaks bleeding down from the top of the wall
+  g.fillStyle = 'rgba(240,238,228,0.10)';
+  for (let i = 0; i < 12; i++) {
+    g.fillRect(rnd() * 256, 0, 3 + rnd() * 4, 60 + rnd() * 120);
+  }
+  return c;
+}
+
 // Soft radial sparkle used for the mission beacon glow sprite.
 export function glowTexture() {
   const c = makeCanvas(64, 64);
