@@ -1,81 +1,98 @@
-// random.js — a small seeded random generator.
+// random.js — small deterministic numbers for Port Solana.
 //
-// The city of Port Solana is generated from a fixed seed so every visit (and
-// every screenshot) shows the same streets; gameplay variety uses its own
-// streams so the layout never shifts under the player.
+// Everything the city builds with chance — building heights, shirt
+// colours, which crate a crane is holding — draws from a seeded Rng
+// rather than Math.random, so the town that boots today is the town
+// that boots tomorrow: same towers, same crowds, same parked cars.
+// The generator is a mulberry32: one 32-bit state word, a fast mix,
+// and a period long enough for a whole city's worth of decisions.
+//
+// The helpers at the bottom (clamp, lerp, angleDelta, dist2d) live
+// here because every system in the game reaches for them and none of
+// them belongs to any one system.
 
 export class Rng {
   constructor(seed) {
-    this.state = seed >>> 0 || 1;
+    // fold the seed into the state; a zero state would stick the
+    // generator at zero forever, so nudge it off the floor
+    this.state = (seed >>> 0) || 0x9e3779b9;
   }
+
+  // the raw draw: one float in [0, 1)
   next() {
-    // mulberry32: tiny, fast, good enough for placing buildings and palms
     this.state = (this.state + 0x6d2b79f5) >>> 0;
     let t = this.state;
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
-  range(min, max) {
-    return min + this.next() * (max - min);
+
+  // a float in [lo, hi)
+  range(lo, hi) {
+    return lo + this.next() * (hi - lo);
   }
-  int(min, max) {
-    return Math.floor(this.range(min, max + 1));
+
+  // an integer in [lo, hi], both ends included
+  int(lo, hi) {
+    return lo + Math.floor(this.next() * (hi - lo + 1));
   }
-  pick(list) {
-    return list[Math.floor(this.next() * list.length) % list.length];
-  }
+
+  // true with probability p
   chance(p) {
     return this.next() < p;
   }
-  // Fisher–Yates, in place: returns the same list, shuffled by this
-  // stream. Decks of jobs and destinations draw from a shuffle so the
-  // same card cannot come up twice in a row by accident.
+
+  // +1 or -1, a coin flip
+  sign() {
+    return this.next() < 0.5 ? -1 : 1;
+  }
+
+  // an angle in [0, 2π)
+  angle() {
+    return this.next() * Math.PI * 2;
+  }
+
+  // one element of an array, chosen at random
+  pick(list) {
+    return list[Math.floor(this.next() * list.length)];
+  }
+
+  // a shuffled copy of the array (Fisher–Yates, from the tail in)
   shuffle(list) {
-    for (let i = list.length - 1; i > 0; i--) {
+    const out = list.slice();
+    for (let i = out.length - 1; i > 0; i--) {
       const j = Math.floor(this.next() * (i + 1));
-      const tmp = list[i];
-      list[i] = list[j];
-      list[j] = tmp;
+      const tmp = out[i];
+      out[i] = out[j];
+      out[j] = tmp;
     }
-    return list;
-  }
-  // n distinct entries from a list, drawn without disturbing the list
-  sample(list, n) {
-    const copy = list.slice();
-    this.shuffle(copy);
-    return copy.slice(0, Math.max(0, Math.min(n, copy.length)));
-  }
-  // pick an index by weights (an array of non-negative numbers)
-  weighted(weights) {
-    let total = 0;
-    for (const w of weights) total += w;
-    if (total <= 0) return 0;
-    let roll = this.next() * total;
-    for (let i = 0; i < weights.length; i++) {
-      roll -= weights[i];
-      if (roll <= 0) return i;
-    }
-    return weights.length - 1;
+    return out;
   }
 }
 
+// hold v inside [lo, hi]
 export function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
+// the point t of the way from a to b (t is not clamped: callers may
+// extrapolate on purpose)
 export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-// shortest signed angular difference from a to b, in radians
+// the shortest signed turn from angle a to angle b, in (-π, π]:
+// positive means b is reached by turning the way headings increase
 export function angleDelta(a, b) {
   let d = (b - a) % (Math.PI * 2);
   if (d > Math.PI) d -= Math.PI * 2;
-  if (d < -Math.PI) d += Math.PI * 2;
+  if (d <= -Math.PI) d += Math.PI * 2;
   return d;
 }
 
+// flat distance between two points on the ground plane
 export function dist2d(ax, az, bx, bz) {
-  return Math.hypot(ax - bx, az - bz);
+  const dx = bx - ax;
+  const dz = bz - az;
+  return Math.sqrt(dx * dx + dz * dz);
 }

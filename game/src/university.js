@@ -449,6 +449,42 @@ export function buildUniversity(gl, textures) {
   rowboat.rot = [0, 0.5, 0];
   group.add(rowboat);
 
+  // the rowing club's other boat, added with the re-implementation:
+  // a skiff actually out on the water, rowing a slow ellipse off
+  // the jetty at the hour when the light does its best work. The
+  // hull and the rower are one small group; the oars are children
+  // on their own pivots so the stroke can sweep. Whoever she is,
+  // she has the whole west water to herself and rows like it.
+  const skiff = new Obj();
+  const skiffB = new GeoBuilder();
+  skiffB.box(0, 0, 0, 4.4, 0.45, 1.25, hexColor(0xe9c46a));
+  skiffB.box(2.4, 0.05, 0, 0.7, 0.3, 0.8, hexColor(0xe9c46a));
+  skiffB.box(-0.9, 0.3, 0, 0.14, 0.12, 1.05, hexColor(0x7a5c3e)); // the thwart she faces
+  skiffB.box(0.9, 0.3, 0, 0.14, 0.12, 1.05, hexColor(0x7a5c3e)); // the thwart she sits on
+  skiff.add(new Obj(skiffB.build(gl)));
+  const rowerB = new GeoBuilder();
+  rowerB.box(0, 0.85, 0, 0.4, 0.6, 0.22, hexColor(0xbc4749)); // club colours
+  rowerB.box(0, 1.32, 0, 0.22, 0.24, 0.22, hexColor(0xa96f3f));
+  rowerB.box(0, 1.48, 0, 0.24, 0.06, 0.24, hexColor(0xf2f0eb)); // a sun hat
+  const rower = new Obj(rowerB.build(gl));
+  rower.pos = [0.9, 0.25, 0];
+  rower.rot = [0, -Math.PI / 2, 0]; // she faces the stern, as rowers do
+  skiff.add(rower);
+  const oarGeo = (side) => {
+    const b = new GeoBuilder();
+    b.box(0, 0, side * 1.05, 0.07, 0.05, 2.1, hexColor(0x9a7d52));
+    b.box(0, -0.04, side * 2.05, 0.16, 0.03, 0.5, hexColor(0x9a7d52)); // the blade
+    return b.build(gl);
+  };
+  const oarL = new Obj(oarGeo(1));
+  oarL.pos = [0.9, 0.55, 0.4];
+  skiff.add(oarL);
+  const oarR = new Obj(oarGeo(-1));
+  oarR.pos = [0.9, 0.55, -0.4];
+  skiff.add(oarR);
+  skiff.pos = [-320, 0.1, 70];
+  group.add(skiff);
+
   return {
     group,
     colliders,
@@ -467,6 +503,18 @@ export function buildUniversity(gl, textures) {
       }
       rowboat.pos[1] = 0.1 + Math.sin(now * 1.1) * 0.07;
       rowboat.rot[2] = Math.sin(now * 0.9 + 1) * 0.045;
+      // the skiff rows her ellipse: position from the parameter,
+      // heading from its tangent, oars sweeping once a stroke
+      const lap = now * 0.045;
+      skiff.pos[0] = -320 + Math.cos(lap) * 5;
+      skiff.pos[2] = 70 + Math.sin(lap) * 20;
+      skiff.pos[1] = 0.1 + Math.sin(now * 1.05 + 2) * 0.06;
+      skiff.rot[1] = Math.atan2(-Math.sin(lap) * 5, Math.cos(lap) * 20);
+      skiff.rot[2] = Math.sin(now * 0.85) * 0.03;
+      const stroke = Math.sin(now * 1.5) * 0.32;
+      oarL.rot[0] = stroke;
+      oarR.rot[0] = stroke;
+      rower.rot[0] = Math.sin(now * 1.5) * 0.12;
     },
   };
 }

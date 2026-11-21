@@ -16,6 +16,7 @@ import { buildAirport } from './airport.js';
 import { buildMarina } from './marina.js';
 import { buildUniversity } from './university.js';
 import { CabCo } from './taxi.js';
+import { Postcards, POSTCARD_REWARD } from './collect.js';
 import { Car, TrafficSystem, drivePlayerCar, carCarImpact } from './vehicles.js';
 import { Person, Pedestrians, Player } from './people.js';
 import { WantedSystem, PoliceSystem, losBlocked } from './police.js';
@@ -166,6 +167,38 @@ const taxi = new CabCo(renderer.gl, world, {
   },
 });
 
+// ------------------------------------------------------------ the postcards
+//
+// Twenty-five cards hidden at the island's landmarks (collect.js).
+// Finding one chimes, toasts the count, and shows what is written on
+// its back; finding them all pays the album's reward and closes the
+// little mystery of who left them.
+const postcards = new Postcards(renderer.gl, {
+  onCollect: (card, found, total) => {
+    audio.pickup();
+    hud.toast('✉ Postcard ' + found + '/' + total + ' — ' + card.name);
+    hud.showStory([card.line, card.ps]);
+    saveGame();
+  },
+  onDistrict: (district, bonus) => {
+    player.money += bonus;
+    audio.cash();
+    hud.toast('✉ ' + district + ' complete — +$' + bonus);
+    saveGame();
+  },
+  onComplete: () => {
+    player.money += POSTCARD_REWARD;
+    audio.missionDone();
+    hud.showStory([
+      'Every postcard found. The whole island, in an album.',
+      'The last one is addressed to Dario. The handwriting is his mother\'s.',
+      '"Now you have seen it all. Come home for dinner."  +$' + POSTCARD_REWARD,
+    ]);
+    saveGame();
+  },
+});
+scene.add(postcards.group);
+
 // ------------------------------------------------------------ state
 let state = 'menu';
 let now = 0;
@@ -191,6 +224,7 @@ function saveGame() {
       storyDone: missions.storyDone,
       x: player.x, z: player.z,
       health: player.health,
+      postcards: postcards.serialize(),
     }));
   } catch (e) { /* private mode: play without saving */ }
 }
@@ -211,6 +245,7 @@ function applySave(s) {
   missions.completedCount = s.completed ?? 0;
   missions.storyDone = !!s.storyDone;
   if (typeof s.x === 'number') { player.x = s.x; player.z = s.z; }
+  if (s.postcards) postcards.restore(s.postcards);
 }
 
 function startGame(fresh) {
@@ -361,8 +396,10 @@ function setupPhoto(mode) {
     }
     missions.startNext();
   } else if (mode === 'mission') {
-    player.x = 45; player.z = 186; player.heading = Math.PI;
-    input.yaw = Math.PI * 2;
+    // face the café, so the frame holds what the mission is about:
+    // Dario, the avenue, and the gold column over Café Solmar
+    player.x = 45; player.z = 186; player.heading = 0;
+    input.yaw = Math.PI;
     missions.index = 1;
     missions.startNext();
     if (missions.active) {
@@ -640,6 +677,15 @@ function frame(nowMs) {
   renderer.view = Mat4.lookAt([camX, Math.max(0.7, camY), camZ], [px, 1.5, pz], [0, 1, 0]);
   renderer.camPos = [camX, Math.max(0.7, camY), camZ];
 
+  // ---- the postcards: they turn and bob with the breeze, and one
+  // within reach of the focus — the car when driving, Dario on
+  // foot — is collected. When no job has the gold ring, the nearest
+  // card within a good walk borrows it.
+  postcards.update(dt, focus, performance.now());
+  const cardTarget = (taxi.marker() || missions.marker())
+    ? null
+    : postcards.nearest(focus, 170);
+
   // ---- sound and HUD
   audio.setSiren(wanted.stars > 0 ? nearCop : 0, dt);
   hud.update(performance.now(), {
@@ -653,9 +699,10 @@ function frame(nowMs) {
     bust: wanted.bustProgress,
     prompt,
     player: { x: pp.x, z: pp.z, heading: player.inCar ? player.inCar.heading : player.heading },
-    target: taxi.marker() || missions.marker(),
+    target: taxi.marker() || missions.marker() || cardTarget,
     police: police.cars,
     cars: traffic.cars.slice(0, 18),
+    postcards: { found: postcards.found, total: postcards.cards.length },
   });
 
   saveTimer -= dt;
@@ -674,4 +721,4 @@ requestAnimationFrame(frame);
 // the debug handle: the state, the player, and the live systems — the
 // world and its traffic included, so a test (or a curious player in the
 // console) can see the whole town's wiring from one place
-window.__solara = { get state() { return state; }, player, wanted, missions, taxi, world, traffic, police };
+window.__solara = { get state() { return state; }, player, wanted, missions, taxi, world, traffic, police, postcards };

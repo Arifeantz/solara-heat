@@ -89,6 +89,7 @@ export class CabCo {
     this.boardHealth = 100;
     this.terrified = false;
     this.complained = false;
+    this.thrilled = false; // the ride's one brush with real speed
     this.deck = []; // shuffled destinations, dealt without repeats
     this.lastCtx = null;
   }
@@ -209,6 +210,7 @@ export class CabCo {
     this.timerExpired = false;
     this.terrified = false;
     this.complained = false;
+    this.thrilled = false;
     this.boardHealth = ctx.car ? ctx.car.health : 100;
     this.chatterIn = 7 + this.rng.range(0, 6); // small talk, on a timer
     this.state = 'carrying';
@@ -304,6 +306,21 @@ export class CabCo {
       if (!this.complained && ctx.wanted >= 2) {
         this.complained = true;
         this.hooks.showStory([[this.passengerName, 'Are those sirens for us? …Should I be lying down back here?']]);
+      }
+      // the thrill: one clean brush with real speed — past 26 m/s
+      // with the car whole and the law elsewhere — and the ride
+      // gains a story the passenger will tell at dinner. It pays:
+      // the tip pool grows by a thrill bonus, once per ride, and
+      // only for passengers who are enjoying themselves.
+      if (!this.thrilled && !this.terrified && ctx.car &&
+          Math.abs(ctx.car.speed) > 26 && ctx.wanted === 0) {
+        this.thrilled = true;
+        this.tipPool += 12;
+        this.hooks.showStory([[this.passengerName, this.rng.pick([
+          'Wheee— ahem. I mean. Very smooth. Do the bridge again.',
+          'My grandson drives like this. I never tell him I like it.',
+          'If my sister asks, we crawled. If anyone else asks — we flew.',
+        ])]]);
       }
       // small talk: a carried passenger fills a quiet cab the way
       // passengers do — one remark per ride, timed for the middle of it

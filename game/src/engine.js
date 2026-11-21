@@ -1,27 +1,105 @@
-// engine.js — a compact original WebGL engine for Solara Heat.
+// engine.js — the whole renderer, in one file, by hand.
 //
-// Written from scratch for this game: matrix maths, a geometry builder that
-// bakes boxes/cylinders/cones into vertex buffers, one lit shader with fog
-// and an optional texture, and a tiny scene graph (Obj) for things that move.
-// No library code: every line here is the game's own.
+// Solara Heat runs on a small WebGL engine written for this game:
+// column-major 4×4 matrices, a geometry builder that bakes coloured
+// (and optionally textured) triangles into merged meshes, a scene
+// graph of Objs with position/rotation/scale, and a Renderer that
+// draws the graph with one shader — a warm directional sun, a soft
+// sky bounce, per-object emissive, distance fog, and alpha where an
+// object asks for it. No libraries, no assets: every vertex in Port
+// Solana is placed by code in this project.
+//
+// Conventions the rest of the game relies on:
+//   · ground-plane positions are (x, z), heights are y, and a heading
+//     θ faces (sin θ, cos θ) on the ground;
+//   · matrices are column-major, stored in Float32Array(16), and a
+//     point transforms as M · [x, y, z, 1];
+//   · geometry is built around its own origin and centred where the
+//     builder's arguments say it is — a box at (cx, cy, cz) spans
+//     cy ± h/2, a cylinder stands cy ± h/2, and so on;
+//   · colours travel as [r, g, b] triples in 0..1 (see hexColor).
 
-// ---------------------------------------------------------------- matrices
+// ------------------------------------------------------------ matrices
+
 export const Mat4 = {
   identity() {
-    return new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
+    return new Float32Array([
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, 1, 0,
+      0, 0, 0, 1,
+    ]);
   },
+
+  // a · b: the transform that applies b first, then a
   multiply(a, b) {
-    // returns a * b (column-major, WebGL style)
     const o = new Float32Array(16);
     for (let c = 0; c < 4; c++) {
       for (let r = 0; r < 4; r++) {
-        let s = 0;
-        for (let k = 0; k < 4; k++) s += a[k * 4 + r] * b[c * 4 + k];
-        o[c * 4 + r] = s;
+        o[c * 4 + r] =
+          a[r] * b[c * 4] +
+          a[4 + r] * b[c * 4 + 1] +
+          a[8 + r] * b[c * 4 + 2] +
+          a[12 + r] * b[c * 4 + 3];
       }
     }
     return o;
   },
+
+  // a model matrix from a position, an Euler rotation (applied as
+  // yaw about Y, then pitch about X, then roll about Z) and a scale —
+  // the one constructor every placed object in the game goes through
+  compose(x, y, z, rx, ry, rz, sx, sy, sz) {
+    const cx = Math.cos(rx), sxn = Math.sin(rx);
+    const cy = Math.cos(ry), syn = Math.sin(ry);
+    const cz = Math.cos(rz), szn = Math.sin(rz);
+    // R = Ry · Rx · Rz, written out entry by entry
+    const r00 = cy * cz + syn * sxn * szn;
+    const r01 = -cy * szn + syn * sxn * cz;
+    const r02 = syn * cx;
+    const r10 = cx * szn;
+    const r11 = cx * cz;
+    const r12 = -sxn;
+    const r20 = -syn * cz + cy * sxn * szn;
+    const r21 = syn * szn + cy * sxn * cz;
+    const r22 = cy * cx;
+    return new Float32Array([
+      r00 * sx, r10 * sx, r20 * sx, 0,
+      r01 * sy, r11 * sy, r21 * sy, 0,
+      r02 * sz, r12 * sz, r22 * sz, 0,
+      x, y, z, 1,
+    ]);
+  },
+
+  // the view matrix that puts the camera at eye, looking at target
+  lookAt(eye, target, up) {
+    let zx = eye[0] - target[0];
+    let zy = eye[1] - target[1];
+    let zz = eye[2] - target[2];
+    let len = Math.hypot(zx, zy, zz) || 1;
+    zx /= len; zy /= len; zz /= len;
+    // x axis: up × z, normalised
+    let xx = up[1] * zz - up[2] * zy;
+    let xy = up[2] * zx - up[0] * zz;
+    let xz = up[0] * zy - up[1] * zx;
+    len = Math.hypot(xx, xy, xz) || 1;
+    xx /= len; xy /= len; xz /= len;
+    // y axis: z × x
+    const yx = zy * xz - zz * xy;
+    const yy = zz * xx - zx * xz;
+    const yz = zx * xy - zy * xx;
+    return new Float32Array([
+      xx, yx, zx, 0,
+      xy, yy, zy, 0,
+      xz, yz, zz, 0,
+      -(xx * eye[0] + xy * eye[1] + xz * eye[2]),
+      -(yx * eye[0] + yy * eye[1] + yz * eye[2]),
+      -(zx * eye[0] + zy * eye[1] + zz * eye[2]),
+      1,
+    ]);
+  },
+
+  // a perspective projection: vertical field of view in radians
   perspective(fovY, aspect, near, far) {
     const f = 1 / Math.tan(fovY / 2);
     const o = new Float32Array(16);
@@ -32,70 +110,39 @@ export const Mat4 = {
     o[14] = (2 * far * near) / (near - far);
     return o;
   },
-  lookAt(eye, target, up) {
-    const zx = eye[0] - target[0], zy = eye[1] - target[1], zz = eye[2] - target[2];
-    let len = Math.hypot(zx, zy, zz) || 1;
-    const z = [zx / len, zy / len, zz / len];
-    const x = norm3(cross3(up, z));
-    const y = cross3(z, x);
-    const o = Mat4.identity();
-    o[0] = x[0]; o[4] = x[1]; o[8] = x[2];
-    o[1] = y[0]; o[5] = y[1]; o[9] = y[2];
-    o[2] = z[0]; o[6] = z[1]; o[10] = z[2];
-    o[12] = -(x[0] * eye[0] + x[1] * eye[1] + x[2] * eye[2]);
-    o[13] = -(y[0] * eye[0] + y[1] * eye[1] + y[2] * eye[2]);
-    o[14] = -(z[0] * eye[0] + z[1] * eye[1] + z[2] * eye[2]);
-    return o;
-  },
-  compose(px, py, pz, rx, ry, rz, sx, sy, sz) {
-    // T * Ry * Rx * Rz * S — yaw first, the order vehicles and people want
-    let m = Mat4.identity();
-    m[12] = px; m[13] = py; m[14] = pz;
-    m = Mat4.multiply(m, rotY(ry));
-    if (rx) m = Mat4.multiply(m, rotX(rx));
-    if (rz) m = Mat4.multiply(m, rotZ(rz));
-    if (sx !== 1 || sy !== 1 || sz !== 1) {
-      const s = Mat4.identity();
-      s[0] = sx; s[5] = sy; s[10] = sz;
-      m = Mat4.multiply(m, s);
-    }
-    return m;
-  },
+
+  // apply a matrix to one point, with the perspective divide the
+  // affine matrices in this game never actually need but get anyway
   transformPoint(m, x, y, z) {
-    const w = m[3] * x + m[7] * y + m[11] * z + m[15] || 1;
+    const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+    const inv = w !== 0 ? 1 / w : 1;
     return [
-      (m[0] * x + m[4] * y + m[8] * z + m[12]) / w,
-      (m[1] * x + m[5] * y + m[9] * z + m[13]) / w,
-      (m[2] * x + m[6] * y + m[10] * z + m[14]) / w,
+      (m[0] * x + m[4] * y + m[8] * z + m[12]) * inv,
+      (m[1] * x + m[5] * y + m[9] * z + m[13]) * inv,
+      (m[2] * x + m[6] * y + m[10] * z + m[14]) * inv,
     ];
   },
 };
 
-function cross3(a, b) {
-  return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
-}
-function norm3(a) {
-  const l = Math.hypot(a[0], a[1], a[2]) || 1;
-  return [a[0] / l, a[1] / l, a[2] / l];
-}
-function rotX(a) {
-  const c = Math.cos(a), s = Math.sin(a), m = Mat4.identity();
-  m[5] = c; m[6] = s; m[9] = -s; m[10] = c;
-  return m;
-}
-function rotY(a) {
-  const c = Math.cos(a), s = Math.sin(a), m = Mat4.identity();
-  m[0] = c; m[2] = -s; m[8] = s; m[10] = c;
-  return m;
-}
-function rotZ(a) {
-  const c = Math.cos(a), s = Math.sin(a), m = Mat4.identity();
-  m[0] = c; m[1] = s; m[4] = -s; m[5] = c;
-  return m;
+// a 0xRRGGBB colour as the [r, g, b] triple the builders take
+export function hexColor(hex) {
+  return [
+    ((hex >> 16) & 0xff) / 255,
+    ((hex >> 8) & 0xff) / 255,
+    (hex & 0xff) / 255,
+  ];
 }
 
-// ---------------------------------------------------------------- geometry
-// A builder collects coloured, lit triangles; build() uploads them once.
+// ------------------------------------------------------------ geometry
+//
+// A GeoBuilder accumulates vertices (position, normal, colour, uv)
+// and indices into plain arrays. The district modules merge smaller
+// builders into bigger ones under matrices (see mergeGeo in
+// airport.js), which reads these arrays directly — and reads `base`,
+// the running vertex count, to offset the merged indices. Every
+// primitive below therefore keeps `base` exactly equal to the number
+// of vertices pushed so far.
+
 export class GeoBuilder {
   constructor() {
     this.pos = [];
@@ -105,360 +152,426 @@ export class GeoBuilder {
     this.idx = [];
     this.base = 0;
   }
-  pushVert(x, y, z, nx, ny, nz, color, u, v) {
+
+  _syncBase() {
+    this.base = this.pos.length / 3;
+  }
+
+  _vertex(x, y, z, nx, ny, nz, color, u, v) {
     this.pos.push(x, y, z);
     this.nor.push(nx, ny, nz);
     this.col.push(color[0], color[1], color[2]);
-    this.uv.push(u || 0, v || 0);
+    this.uv.push(u, v);
   }
-  quad(a, b, c, d, n, color, uvRect) {
-    // a-b-c-d counter-clockwise seen from the normal side
-    const i = this.base;
-    const [u0, v0, u1, v1] = uvRect || [0, 0, 1, 1];
-    this.pushVert(...a, ...n, color, u0, v0);
-    this.pushVert(...b, ...n, color, u1, v0);
-    this.pushVert(...c, ...n, color, u1, v1);
-    this.pushVert(...d, ...n, color, u0, v1);
-    this.idx.push(i, i + 1, i + 2, i, i + 2, i + 3);
-    this.base += 4;
-  }
-  box(cx, cy, cz, sx, sy, sz, color, uvScale) {
-    const x0 = cx - sx / 2, x1 = cx + sx / 2;
-    const y0 = cy - sy / 2, y1 = cy + sy / 2;
-    const z0 = cz - sz / 2, z1 = cz + sz / 2;
-    const us = uvScale || 1;
-    const R = [0, 0, us, us];
-    this.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], color, R); // south
-    this.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], color, R); // north
-    this.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [1, 0, 0], color, R); // east
-    this.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], color, R); // west
-    this.quad([x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], [0, 1, 0], color, R); // top
-    this.quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0], color, R); // bottom
+
+  // one quad: corners a, b, c, d in order, one shared normal, and a
+  // uv rectangle [u0, v0, u1, v1] laid over them in the same order
+  quad(a, b, c, d, normal, color, uv) {
+    const s = this.base;
+    const [u0, v0, u1, v1] = uv;
+    this._vertex(a[0], a[1], a[2], normal[0], normal[1], normal[2], color, u0, v0);
+    this._vertex(b[0], b[1], b[2], normal[0], normal[1], normal[2], color, u1, v0);
+    this._vertex(c[0], c[1], c[2], normal[0], normal[1], normal[2], color, u1, v1);
+    this._vertex(d[0], d[1], d[2], normal[0], normal[1], normal[2], color, u0, v1);
+    this.idx.push(s, s + 1, s + 2, s, s + 2, s + 3);
+    this._syncBase();
     return this;
   }
-  cylinder(cx, cy, cz, rTop, rBottom, h, seg, color, capped = true) {
+
+  // one triangle, for the ends of prisms and other small caps
+  tri(a, b, c, normal, color) {
+    const s = this.base;
+    this._vertex(a[0], a[1], a[2], normal[0], normal[1], normal[2], color, 0, 0);
+    this._vertex(b[0], b[1], b[2], normal[0], normal[1], normal[2], color, 1, 0);
+    this._vertex(c[0], c[1], c[2], normal[0], normal[1], normal[2], color, 0.5, 1);
+    this.idx.push(s, s + 1, s + 2);
+    this._syncBase();
+    return this;
+  }
+
+  // a box centred at (cx, cy, cz) with size (w, h, d); every face
+  // carries the full 0..1 uv so a texture reads once per face
+  box(cx, cy, cz, w, h, d, color) {
+    const x0 = cx - w / 2, x1 = cx + w / 2;
     const y0 = cy - h / 2, y1 = cy + h / 2;
+    const z0 = cz - d / 2, z1 = cz + d / 2;
+    const uv = [0, 0, 1, 1];
+    this.quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1], [0, 0, 1], color, uv);
+    this.quad([x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [0, 0, -1], color, uv);
+    this.quad([x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [1, 0, 0], color, uv);
+    this.quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [-1, 0, 0], color, uv);
+    this.quad([x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0], [0, 1, 0], color, uv);
+    this.quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0], color, uv);
+    return this;
+  }
+
+  // a cylinder centred at (cx, cy, cz): radius rBottom at the foot,
+  // rTop at the head, `height` tall, `seg` sides, capped both ends
+  cylinder(cx, cy, cz, rTop, rBottom, height, seg, color) {
+    const y0 = cy - height / 2;
+    const y1 = cy + height / 2;
+    // the side wall, one quad per segment, normals pointing outward
     for (let i = 0; i < seg; i++) {
       const a0 = (i / seg) * Math.PI * 2;
       const a1 = ((i + 1) / seg) * Math.PI * 2;
-      const s0 = Math.sin(a0), c0 = Math.cos(a0);
-      const s1 = Math.sin(a1), c1 = Math.cos(a1);
-      const n0 = [c0, 0, s0], n1 = [c1, 0, s1];
-      const idx = this.base;
-      this.pushVert(cx + c0 * rBottom, y0, cz + s0 * rBottom, ...n0, color);
-      this.pushVert(cx + c1 * rBottom, y0, cz + s1 * rBottom, ...n1, color);
-      this.pushVert(cx + c1 * rTop, y1, cz + s1 * rTop, ...n1, color);
-      this.pushVert(cx + c0 * rTop, y1, cz + s0 * rTop, ...n0, color);
-      this.idx.push(idx, idx + 1, idx + 2, idx, idx + 2, idx + 3);
-      this.base += 4;
-      if (capped) {
-        const t = this.base;
-        this.pushVert(cx, y1, cz, 0, 1, 0, color);
-        this.pushVert(cx + c0 * rTop, y1, cz + s0 * rTop, 0, 1, 0, color);
-        this.pushVert(cx + c1 * rTop, y1, cz + s1 * rTop, 0, 1, 0, color);
-        this.idx.push(t, t + 1, t + 2);
-        this.base += 3;
+      const c0 = Math.cos(a0), s0 = Math.sin(a0);
+      const c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const s = this.base;
+      this._vertex(cx + c0 * rBottom, y0, cz + s0 * rBottom, c0, 0, s0, color, i / seg, 0);
+      this._vertex(cx + c1 * rBottom, y0, cz + s1 * rBottom, c1, 0, s1, color, (i + 1) / seg, 0);
+      this._vertex(cx + c1 * rTop, y1, cz + s1 * rTop, c1, 0, s1, color, (i + 1) / seg, 1);
+      this._vertex(cx + c0 * rTop, y1, cz + s0 * rTop, c0, 0, s0, color, i / seg, 1);
+      this.idx.push(s, s + 1, s + 2, s, s + 2, s + 3);
+      this._syncBase();
+    }
+    // the caps: fans around a centre vertex
+    for (const [ry, r, ny] of [[y1, rTop, 1], [y0, rBottom, -1]]) {
+      const centre = this.base;
+      this._vertex(cx, ry, cz, 0, ny, 0, color, 0.5, 0.5);
+      this._syncBase();
+      for (let i = 0; i < seg; i++) {
+        const a0 = (i / seg) * Math.PI * 2;
+        const a1 = ((i + 1) / seg) * Math.PI * 2;
+        const s = this.base;
+        this._vertex(cx + Math.cos(a0) * r, ry, cz + Math.sin(a0) * r, 0, ny, 0, color,
+          0.5 + Math.cos(a0) * 0.5, 0.5 + Math.sin(a0) * 0.5);
+        this._vertex(cx + Math.cos(a1) * r, ry, cz + Math.sin(a1) * r, 0, ny, 0, color,
+          0.5 + Math.cos(a1) * 0.5, 0.5 + Math.sin(a1) * 0.5);
+        this._syncBase();
+        if (ny > 0) this.idx.push(centre, s, s + 1);
+        else this.idx.push(centre, s + 1, s);
       }
     }
     return this;
   }
-  cone(cx, cy, cz, r, h, seg, color) {
-    const y0 = cy - h / 2, y1 = cy + h / 2;
+
+  // a cone centred at (cx, cy, cz): a base disc of radius r at the
+  // foot and the apex a full `height` above it, `seg` sides, capped
+  cone(cx, cy, cz, r, height, seg, color) {
+    const y0 = cy - height / 2;
+    const y1 = cy + height / 2;
+    // the slope normal leans outward and up in proportion to the
+    // cone's own slope, so the light falls on it honestly
+    const lean = r / Math.hypot(r, height);
+    const rise = height / Math.hypot(r, height);
     for (let i = 0; i < seg; i++) {
       const a0 = (i / seg) * Math.PI * 2;
       const a1 = ((i + 1) / seg) * Math.PI * 2;
-      const n = norm3([Math.cos((a0 + a1) / 2), r / h, Math.sin((a0 + a1) / 2)]);
-      const idx = this.base;
-      this.pushVert(cx + Math.cos(a0) * r, y0, cz + Math.sin(a0) * r, ...n, color);
-      this.pushVert(cx + Math.cos(a1) * r, y0, cz + Math.sin(a1) * r, ...n, color);
-      this.pushVert(cx, y1, cz, ...n, color);
-      this.idx.push(idx, idx + 1, idx + 2);
-      this.base += 3;
+      const am = (a0 + a1) / 2;
+      const n = [Math.cos(am) * rise, lean, Math.sin(am) * rise];
+      const s = this.base;
+      this._vertex(cx + Math.cos(a0) * r, y0, cz + Math.sin(a0) * r, n[0], n[1], n[2], color, i / seg, 0);
+      this._vertex(cx + Math.cos(a1) * r, y0, cz + Math.sin(a1) * r, n[0], n[1], n[2], color, (i + 1) / seg, 0);
+      this._vertex(cx, y1, cz, n[0], n[1], n[2], color, (i + 0.5) / seg, 1);
+      this.idx.push(s, s + 1, s + 2);
+      this._syncBase();
+    }
+    // the base cap
+    const centre = this.base;
+    this._vertex(cx, y0, cz, 0, -1, 0, color, 0.5, 0.5);
+    this._syncBase();
+    for (let i = 0; i < seg; i++) {
+      const a0 = (i / seg) * Math.PI * 2;
+      const a1 = ((i + 1) / seg) * Math.PI * 2;
+      const s = this.base;
+      this._vertex(cx + Math.cos(a0) * r, y0, cz + Math.sin(a0) * r, 0, -1, 0, color,
+        0.5 + Math.cos(a0) * 0.5, 0.5 + Math.sin(a0) * 0.5);
+      this._vertex(cx + Math.cos(a1) * r, y0, cz + Math.sin(a1) * r, 0, -1, 0, color,
+        0.5 + Math.cos(a1) * 0.5, 0.5 + Math.sin(a1) * 0.5);
+      this._syncBase();
+      this.idx.push(centre, s + 1, s);
     }
     return this;
   }
-  // A triangular prism: the ridge runs along X, the cross-section is a
-  // triangle in the (z, y) plane — base width sz, height sy, length sx.
-  // Pediments, ramps, awnings and roof wedges are all this one shape.
-  prism(cx, cy, cz, sx, sy, sz, color) {
-    const x0 = cx - sx / 2, x1 = cx + sx / 2;
-    const yb = cy - sy / 2, yt = cy + sy / 2;
-    const zb = cz - sz / 2, zf = cz + sz / 2;
-    // the two slopes: their normals lean out and up, steeper as sy grows
-    const nf = norm3([0, sz, 2 * sy]);
-    const nb = norm3([0, sz, -2 * sy]);
-    this.quad([x0, yb, zf], [x1, yb, zf], [x1, yt, cz], [x0, yt, cz], nf, color);
-    this.quad([x1, yb, zb], [x0, yb, zb], [x0, yt, cz], [x1, yt, cz], nb, color);
-    // the floor nobody sees, kept so the shape is closed from below
-    this.quad([x0, yb, zb], [x1, yb, zb], [x1, yb, zf], [x0, yb, zf], [0, -1, 0], color);
-    // the two triangular ends
-    const tri = (a, b, c, n) => {
-      const i = this.base;
-      this.pushVert(...a, ...n, color, 0, 0);
-      this.pushVert(...b, ...n, color, 1, 0);
-      this.pushVert(...c, ...n, color, 0.5, 1);
-      this.idx.push(i, i + 1, i + 2);
-      this.base += 3;
-    };
-    tri([x0, yb, zf], [x0, yb, zb], [x0, yt, cz], [-1, 0, 0]);
-    tri([x1, yb, zb], [x1, yb, zf], [x1, yt, cz], [1, 0, 0]);
+
+  // a prism centred at (cx, cy, cz): a triangular cross-section in
+  // the YZ plane — a base `d` wide at the foot, an apex ridge `h`
+  // tall running along X — extruded `w` along X. Roof pieces and
+  // pediments are what it is for.
+  prism(cx, cy, cz, w, h, d, color) {
+    const x0 = cx - w / 2, x1 = cx + w / 2;
+    const yb = cy - h / 2, yt = cy + h / 2;
+    const za = cz - d / 2, zb = cz + d / 2;
+    const uv = [0, 0, 1, 1];
+    // the two slopes: their normals lean out and up together
+    const nl = Math.hypot(h, d / 2);
+    const nA = [0, (d / 2) / nl, -h / nl];
+    const nB = [0, (d / 2) / nl, h / nl];
+    this.quad([x0, yb, za], [x1, yb, za], [x1, yt, cz], [x0, yt, cz], nA, color, uv);
+    this.quad([x1, yb, zb], [x0, yb, zb], [x0, yt, cz], [x1, yt, cz], nB, color, uv);
+    // the floor (rarely seen, always honest)
+    this.quad([x0, yb, zb], [x1, yb, zb], [x1, yb, za], [x0, yb, za], [0, -1, 0], color, uv);
+    // the triangular ends
+    this.tri([x0, yb, zb], [x0, yb, za], [x0, yt, cz], [-1, 0, 0], color);
+    this.tri([x1, yb, za], [x1, yb, zb], [x1, yt, cz], [1, 0, 0], color);
     return this;
   }
+
+  // freeze the accumulated arrays into a GPU mesh
   build(gl) {
-    const mesh = new Mesh(gl);
-    mesh.upload(this.pos, this.nor, this.col, this.uv, this.idx);
-    return mesh;
+    return new Mesh(gl, this);
   }
 }
+
+// ------------------------------------------------------------ mesh
+//
+// A Mesh is one builder's worth of geometry on the GPU: four vertex
+// buffers and an index buffer, drawn in a single call.
 
 export class Mesh {
-  constructor(gl) {
-    this.gl = gl;
-    this.count = 0;
-    this.buffers = {};
-  }
-  upload(pos, nor, col, uv, idx) {
-    const gl = this.gl;
-    const mk = (data, type) => {
-      const b = gl.createBuffer();
-      gl.bindBuffer(type, b);
-      gl.bufferData(type, data, gl.STATIC_DRAW);
-      return b;
+  constructor(gl, source) {
+    this.count = source.idx.length;
+    const upload = (data, itemSize, isIndex) => {
+      const buf = gl.createBuffer();
+      gl.bindBuffer(isIndex ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER, buf);
+      gl.bufferData(isIndex ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+      return buf;
     };
-    this.buffers.pos = mk(new Float32Array(pos), gl.ARRAY_BUFFER);
-    this.buffers.nor = mk(new Float32Array(nor), gl.ARRAY_BUFFER);
-    this.buffers.col = mk(new Float32Array(col), gl.ARRAY_BUFFER);
-    this.buffers.uv = mk(new Float32Array(uv), gl.ARRAY_BUFFER);
-    this.buffers.idx = mk(new Uint32Array(idx), gl.ELEMENT_ARRAY_BUFFER);
-    this.count = idx.length;
+    this.posBuf = upload(new Float32Array(source.pos), 3, false);
+    this.norBuf = upload(new Float32Array(source.nor), 3, false);
+    this.colBuf = upload(new Float32Array(source.col), 3, false);
+    this.uvBuf = upload(new Float32Array(source.uv), 2, false);
+    this.idxBuf = upload(new Uint32Array(source.idx), 1, true);
+  }
+
+  draw(gl, loc) {
+    const bind = (buf, location, size) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.vertexAttribPointer(location, size, gl.FLOAT, false, 0, 0);
+      gl.enableVertexAttribArray(location);
+    };
+    bind(this.posBuf, loc.aPos, 3);
+    bind(this.norBuf, loc.aNor, 3);
+    bind(this.colBuf, loc.aCol, 3);
+    bind(this.uvBuf, loc.aUv, 2);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.idxBuf);
+    gl.drawElements(gl.TRIANGLES, this.count, gl.UNSIGNED_INT, 0);
   }
 }
 
-// ---------------------------------------------------------------- renderer
-const VERT = `
+// ------------------------------------------------------------ renderer
+
+const VERT_SRC = `
 attribute vec3 aPos;
 attribute vec3 aNor;
 attribute vec3 aCol;
 attribute vec2 aUv;
-uniform mat4 uMVP;
+uniform mat4 uProj;
+uniform mat4 uView;
 uniform mat4 uModel;
+varying vec3 vCol;
+varying vec3 vNor;
+varying vec2 vUv;
+varying vec3 vWorld;
+void main() {
+  vec4 world = uModel * vec4(aPos, 1.0);
+  vWorld = world.xyz;
+  vNor = mat3(uModel) * aNor;
+  vCol = aCol;
+  vUv = aUv;
+  gl_Position = uProj * uView * world;
+}
+`;
+
+const FRAG_SRC = `
+uniform sampler2D uTex;
+uniform float uUseTex;
+uniform float uEmissive;
+uniform float uAlpha;
 uniform vec3 uCamPos;
 varying vec3 vCol;
 varying vec3 vNor;
 varying vec2 vUv;
-varying float vDist;
+varying vec3 vWorld;
 void main() {
-  vec4 world = uModel * vec4(aPos, 1.0);
-  vNor = mat3(uModel) * aNor;
-  vCol = aCol;
-  vUv = aUv;
-  vec4 clip = uMVP * vec4(aPos, 1.0);
-  gl_Position = clip;
-  vDist = length(world.xyz - uCamPos);
-}
-`;
-const FRAG = `
-precision mediump float;
-varying vec3 vCol;
-varying vec3 vNor;
-varying vec2 vUv;
-varying float vDist;
-uniform sampler2D uTex;
-uniform float uUseTex;
-uniform vec3 uSunDir;
-uniform vec3 uSunCol;
-uniform vec3 uSkyCol;
-uniform vec3 uFogCol;
-uniform float uFogNear;
-uniform float uFogFar;
-uniform float uEmissive;
-uniform float uAlpha;
-void main() {
-  vec3 n = normalize(vNor);
   vec3 base = vCol;
-  if (uUseTex > 0.5) base *= texture2D(uTex, vUv).rgb;
-  float diff = max(dot(n, uSunDir), 0.0);
-  vec3 lit = base * (uSkyCol + uSunCol * diff) + base * uEmissive;
-  float f = smoothstep(uFogNear, uFogFar, vDist);
-  vec3 outCol = mix(lit, uFogCol, f);
-  gl_FragColor = vec4(outCol, uAlpha);
+  if (uUseTex > 0.5) base = base * texture2D(uTex, vUv).rgb;
+  vec3 n = normalize(vNor);
+  vec3 sunDir = normalize(vec3(0.45, 0.8, 0.3));
+  float diff = max(dot(n, sunDir), 0.0);
+  float sky = 0.5 + 0.5 * n.y;
+  vec3 light = vec3(0.46, 0.47, 0.5)
+    + vec3(0.66, 0.6, 0.52) * diff
+    + vec3(0.08, 0.1, 0.14) * sky;
+  vec3 col = base * light + base * uEmissive;
+  float dist = length(vWorld - uCamPos);
+  float fog = smoothstep(260.0, 820.0, dist);
+  col = mix(col, vec3(0.6, 0.7, 0.83), fog * 0.5);
+  gl_FragColor = vec4(col, uAlpha);
 }
 `;
 
 export class Renderer {
   constructor(canvas) {
-    const gl = canvas.getContext('webgl', { antialias: true, alpha: false });
-    if (!gl) throw new Error('WebGL is not available in this browser.');
-    this.gl = gl;
     this.canvas = canvas;
-    gl.getExtension('OES_element_index_uint');
+    const opts = { antialias: true, alpha: false };
+    let gl = canvas.getContext('webgl2', opts);
+    this.isGL2 = !!gl;
+    if (!gl) {
+      gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts);
+      gl.getExtension('OES_element_index_uint');
+    }
+    this.gl = gl;
+    this.quality = 1;
+    this.cssW = 1;
+    this.cssH = 1;
+    this.view = Mat4.identity();
+    this.camPos = [0, 30, 0];
+    this.proj = Mat4.perspective(1.05, 1, 0.1, 1400);
+
+    // one program for the whole game: compile, link, locate
     const compile = (type, src) => {
-      const s = gl.createShader(type);
-      gl.shaderSource(s, src);
-      gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
-        throw new Error('shader: ' + gl.getShaderInfoLog(s));
+      const sh = gl.createShader(type);
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        throw new Error('shader: ' + gl.getShaderInfoLog(sh));
       }
-      return s;
+      return sh;
     };
+    let vertSrc = VERT_SRC;
+    let fragSrc = FRAG_SRC;
+    if (this.isGL2) {
+      vertSrc = '#version 300 es\n#define attribute in\n#define varying out\n' + vertSrc;
+      fragSrc = '#version 300 es\nprecision mediump float;\n#define varying in\n' +
+        '#define texture2D texture\nout vec4 fragColor;\n#define gl_FragColor fragColor\n' + fragSrc;
+    } else {
+      fragSrc = 'precision mediump float;\n' + fragSrc;
+    }
     const prog = gl.createProgram();
-    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
-    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, vertSrc));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fragSrc));
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
       throw new Error('program: ' + gl.getProgramInfoLog(prog));
     }
-    gl.useProgram(prog);
     this.prog = prog;
     this.loc = {
       aPos: gl.getAttribLocation(prog, 'aPos'),
       aNor: gl.getAttribLocation(prog, 'aNor'),
       aCol: gl.getAttribLocation(prog, 'aCol'),
       aUv: gl.getAttribLocation(prog, 'aUv'),
-      uMVP: gl.getUniformLocation(prog, 'uMVP'),
+      uProj: gl.getUniformLocation(prog, 'uProj'),
+      uView: gl.getUniformLocation(prog, 'uView'),
       uModel: gl.getUniformLocation(prog, 'uModel'),
-      uCamPos: gl.getUniformLocation(prog, 'uCamPos'),
       uTex: gl.getUniformLocation(prog, 'uTex'),
       uUseTex: gl.getUniformLocation(prog, 'uUseTex'),
-      uSunDir: gl.getUniformLocation(prog, 'uSunDir'),
-      uSunCol: gl.getUniformLocation(prog, 'uSunCol'),
-      uSkyCol: gl.getUniformLocation(prog, 'uSkyCol'),
-      uFogCol: gl.getUniformLocation(prog, 'uFogCol'),
-      uFogNear: gl.getUniformLocation(prog, 'uFogNear'),
-      uFogFar: gl.getUniformLocation(prog, 'uFogFar'),
       uEmissive: gl.getUniformLocation(prog, 'uEmissive'),
       uAlpha: gl.getUniformLocation(prog, 'uAlpha'),
+      uCamPos: gl.getUniformLocation(prog, 'uCamPos'),
     };
-    gl.enable(gl.DEPTH_TEST);
-    gl.enable(gl.CULL_FACE);
-    gl.cullFace(gl.BACK);
-    this.view = Mat4.identity();
-    this.proj = Mat4.identity();
-    this.sunDir = [0.45, 0.8, 0.35];
-    this.sunCol = [1.05, 0.95, 0.8];
-    this.skyCol = [0.42, 0.48, 0.55];
-    this.fogCol = [0.87, 0.79, 0.68];
-    this.fogNear = 150;
-    this.fogFar = 500;
-    this.camPos = [0, 0, 0];
-    // render scale: 1 is full resolution; lower values trade sharpness
-    // for frame rate on weak GPUs (the canvas CSS size never changes)
-    this.scaleFactor = 1;
   }
+
+  // size the drawing buffer for a CSS size, honouring the quality
+  // scale (the C key in game) and the display's pixel ratio
   resize(w, h) {
-    const pw = Math.max(1, Math.round(w * this.scaleFactor));
-    const ph = Math.max(1, Math.round(h * this.scaleFactor));
-    this.canvas.width = pw;
-    this.canvas.height = ph;
-    this.gl.viewport(0, 0, pw, ph);
-    this.proj = Mat4.perspective((62 * Math.PI) / 180, w / h, 0.1, 900);
+    this.cssW = Math.max(1, w);
+    this.cssH = Math.max(1, h);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const scale = this.quality * dpr;
+    this.canvas.width = Math.round(this.cssW * scale);
+    this.canvas.height = Math.round(this.cssH * scale);
+    this.proj = Mat4.perspective(1.05, this.cssW / this.cssH, 0.1, 1400);
   }
-  // Cycle-friendly quality control: remembers the CSS size it was last
-  // given so a scale change re-renders at the same on-screen size.
-  setQuality(scale) {
-    this.scaleFactor = scale;
-    this.resize(window.innerWidth, window.innerHeight);
+
+  setQuality(q) {
+    this.quality = q;
+    this.resize(this.cssW, this.cssH);
   }
-  makeTexture(canvas) {
+
+  // upload one of textures.js's {width, height, data} images
+  makeTexture(image) {
     const gl = this.gl;
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, image.width, image.height, 0,
+      gl.RGBA, gl.UNSIGNED_BYTE, image.data);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindTexture(gl.TEXTURE_2D, null);
     return tex;
   }
+
+  // clear the frame and set the per-frame uniforms
   begin() {
     const gl = this.gl;
-    gl.clearColor(this.fogCol[0], this.fogCol[1], this.fogCol[2], 1);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.clearColor(0.55, 0.7, 0.86, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-    gl.uniform3fv(this.loc.uSunDir, norm3(this.sunDir));
-    gl.uniform3fv(this.loc.uSunCol, this.sunCol);
-    gl.uniform3fv(this.loc.uSkyCol, this.skyCol);
-    gl.uniform3fv(this.loc.uFogCol, this.fogCol);
-    gl.uniform1f(this.loc.uFogNear, this.fogNear);
-    gl.uniform1f(this.loc.uFogFar, this.fogFar);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LEQUAL);
+    gl.disable(gl.CULL_FACE); // flat-shaded world: both faces honest
+    gl.useProgram(this.prog);
+    gl.uniformMatrix4fv(this.loc.uProj, false, this.proj);
+    gl.uniformMatrix4fv(this.loc.uView, false, this.view);
     gl.uniform3fv(this.loc.uCamPos, this.camPos);
+    gl.uniform1i(this.loc.uTex, 0);
   }
-  draw(mesh, model, opts = {}) {
+
+  // draw one mesh under one model matrix, with the material the
+  // owning Obj carries (texture handle or null, emissive, alpha)
+  draw(mesh, model, material) {
     const gl = this.gl;
-    const vp = Mat4.multiply(this.proj, this.view);
-    const mvp = Mat4.multiply(vp, model);
-    gl.uniformMatrix4fv(this.loc.uMVP, false, mvp);
-    gl.uniformMatrix4fv(this.loc.uModel, false, model);
-    gl.uniform1f(this.loc.uEmissive, opts.emissive || 0);
-    gl.uniform1f(this.loc.uAlpha, opts.alpha === undefined ? 1 : opts.alpha);
-    if (opts.texture) {
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, opts.texture);
-      gl.uniform1i(this.loc.uTex, 0);
-      gl.uniform1f(this.loc.uUseTex, 1);
+    const alpha = material && material.alpha !== undefined ? material.alpha : 1;
+    if (alpha < 1) {
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.depthMask(false);
     } else {
-      gl.uniform1f(this.loc.uUseTex, 0);
+      gl.disable(gl.BLEND);
+      gl.depthMask(true);
     }
-    if (opts.alpha !== undefined && opts.alpha < 1) gl.enable(gl.BLEND);
-    else gl.disable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    const bind = (loc, buf, size) => {
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-      gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, 0);
-    };
-    bind(this.loc.aPos, mesh.buffers.pos, 3);
-    bind(this.loc.aNor, mesh.buffers.nor, 3);
-    bind(this.loc.aCol, mesh.buffers.col, 3);
-    bind(this.loc.aUv, mesh.buffers.uv, 2);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.buffers.idx);
-    gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_INT, 0);
+    gl.uniformMatrix4fv(this.loc.uModel, false, model);
+    gl.uniform1f(this.loc.uEmissive, material && material.emissive ? material.emissive : 0);
+    gl.uniform1f(this.loc.uAlpha, alpha);
+    const tex = material ? material.texture : null;
+    gl.uniform1f(this.loc.uUseTex, tex ? 1 : 0);
+    if (tex) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+    }
+    mesh.draw(gl, this.loc);
+    if (alpha < 1) gl.depthMask(true);
   }
 }
 
-// ---------------------------------------------------------------- scene graph
-// A movable node: position, euler rotation, scale, an optional mesh, children.
+// ------------------------------------------------------------ scene graph
+//
+// An Obj is a node: an optional mesh, a material (texture, emissive,
+// alpha), a local transform, and children. The whole world is one
+// tree of these, rendered from the root each frame.
+
 export class Obj {
   constructor(mesh = null, opts = {}) {
     this.mesh = mesh;
     this.texture = opts.texture || null;
     this.emissive = opts.emissive || 0;
-    this.alpha = opts.alpha;
+    this.alpha = opts.alpha !== undefined ? opts.alpha : 1;
     this.pos = [0, 0, 0];
     this.rot = [0, 0, 0];
     this.scale = [1, 1, 1];
-    this.children = [];
     this.visible = true;
+    this.children = [];
   }
+
   add(child) {
     this.children.push(child);
-    return child;
+    return this;
   }
-  localMatrix() {
-    return Mat4.compose(
+
+  render(renderer, parent) {
+    if (!this.visible) return;
+    const local = Mat4.compose(
       this.pos[0], this.pos[1], this.pos[2],
       this.rot[0], this.rot[1], this.rot[2],
       this.scale[0], this.scale[1], this.scale[2],
     );
+    const model = parent ? Mat4.multiply(parent, local) : local;
+    if (this.mesh) renderer.draw(this.mesh, model, this);
+    for (const child of this.children) child.render(renderer, model);
   }
-  render(renderer, parent) {
-    if (!this.visible) return;
-    const world = Mat4.multiply(parent, this.localMatrix());
-    if (this.mesh) {
-      renderer.draw(this.mesh, world, {
-        texture: this.texture,
-        emissive: this.emissive,
-        alpha: this.alpha,
-      });
-    }
-    for (const c of this.children) c.render(renderer, world);
-  }
-}
-
-export function hexColor(hex) {
-  return [
-    ((hex >> 16) & 255) / 255,
-    ((hex >> 8) & 255) / 255,
-    (hex & 255) / 255,
-  ];
 }

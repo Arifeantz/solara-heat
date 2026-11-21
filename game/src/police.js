@@ -1,265 +1,362 @@
-// police.js — the Solana Police Department: the wanted level, and the
-// cruisers that answer it.
+// police.js — the law in Port Solana: eyes, heat, and cruisers.
 //
-// Offences feed a heat score; heat becomes stars. Police spawn away from the
-// player's sight and hunt the last position any officer actually saw, so
-// breaking line of sight — ducking behind towers, outrunning the search —
-// lets the heat bleed away. An officer who corners a slow or on-foot player
-// fills the bust meter; fill it and the run ends at the station.
+// losBlocked is the town's eyesight rule: a straight segment between
+// two ground points is blocked when it passes through any building's
+// box. WantedSystem turns offences into heat and heat into stars —
+// and lets heat die when nobody has seen Dario for a while, which is
+// why breaking line of sight is the whole art of the getaway.
+//
+// PoliceSystem runs the fleet. Cruisers live in a small pool: they
+// wait at the HQ forecourt when the town is quiet, roll out as the
+// stars rise, hunt the last place they actually saw the player, and
+// search the avenues when they lose him. At four stars and above
+// they stop only chasing: two of them park across an intersection
+// ahead and make a wall of the road.
 
 import { Car } from './vehicles.js';
 import { GRID_LINES, collideBuildings } from './city.js';
 import { Rng, clamp, angleDelta, dist2d } from './random.js';
 
-const STAR_THRESHOLDS = [0, 1, 45, 95, 155, 230];
-
+// ------------------------------------------------------------ eyesight
+//
+// Segment against axis-aligned boxes, by the slab method: clip the
+// segment's parameter range against each box's x and z slabs; if
+// anything of the segment survives inside a box, the view is blocked.
 export function losBlocked(colliders, ax, az, bx, bz) {
-  for (let i = 1; i < 8; i++) {
-    const t = i / 8;
-    const x = ax + (bx - ax) * t;
-    const z = az + (bz - az) * t;
-    for (const c of colliders) {
-      if (x > c.minX + 1 && x < c.maxX - 1 && z > c.minZ + 1 && z < c.maxZ - 1) return true;
+  const dx = bx - ax;
+  const dz = bz - az;
+  for (const c of colliders) {
+    let t0 = 0;
+    let t1 = 1;
+    // the x slab
+    if (Math.abs(dx) < 1e-9) {
+      if (ax < c.minX || ax > c.maxX) continue;
+    } else {
+      let ta = (c.minX - ax) / dx;
+      let tb = (c.maxX - ax) / dx;
+      if (ta > tb) { const t = ta; ta = tb; tb = t; }
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 > t1) continue;
     }
+    // the z slab
+    if (Math.abs(dz) < 1e-9) {
+      if (az < c.minZ || az > c.maxZ) continue;
+    } else {
+      let ta = (c.minZ - az) / dz;
+      let tb = (c.maxZ - az) / dz;
+      if (ta > tb) { const t = ta; ta = tb; tb = t; }
+      t0 = Math.max(t0, ta);
+      t1 = Math.min(t1, tb);
+      if (t0 > t1) continue;
+    }
+    return true; // some of the segment lives inside this box
   }
   return false;
 }
+
+// ------------------------------------------------------------ the heat
+
+const STAR_THRESHOLDS = [8, 30, 60, 95, 130];
 
 export class WantedSystem {
   constructor() {
     this.heat = 0;
     this.stars = 0;
-    this.hiddenTime = 0;
     this.bustProgress = 0;
-    this.lastOffenceAt = -99;
+    this.lastSeenAt = -Infinity;
+    this.lastOffenceAt = -Infinity;
   }
 
-  commitOffence(points, now) {
-    this.heat = Math.min(320, this.heat + points);
+  // an offence lands: heat rises now, and the decay clock restarts
+  commitOffence(amount, now) {
+    this.heat = Math.min(170, this.heat + amount);
     this.lastOffenceAt = now;
     this.recount();
   }
 
   recount() {
-    let s = 0;
-    for (let i = 1; i < STAR_THRESHOLDS.length; i++) {
-      if (this.heat >= STAR_THRESHOLDS[i]) s = i;
-    }
-    this.stars = s;
+    let stars = 0;
+    for (const t of STAR_THRESHOLDS) if (this.heat >= t) stars++;
+    this.stars = stars;
   }
 
-  // seenByPolice: whether any officer currently has eyes on the player
-  update(dt, seenByPolice, now) {
-    if (this.stars === 0) {
-      this.heat = Math.max(0, this.heat - 20 * dt);
-      this.bustProgress = Math.max(0, this.bustProgress - dt * 0.7);
-      return;
+  // seen: whether any cruiser's eyes are on the player this frame
+  update(dt, seen, now) {
+    if (seen) this.lastSeenAt = now;
+    const quietFor = now - Math.max(this.lastSeenAt, this.lastOffenceAt);
+    if (quietFor > 5 && this.heat > 0) {
+      // heat dies in the open air: roughly five points a second
+      // once the town has stopped looking at you for five seconds
+      this.heat = Math.max(0, this.heat - dt * 5);
+      this.recount();
     }
-    if (seenByPolice) {
-      this.hiddenTime = 0;
-    } else {
-      this.hiddenTime += dt;
-      const grace = this.stars >= 3 ? 7 : 4.5;
-      if (this.hiddenTime > grace && now - this.lastOffenceAt > 5) {
-        this.heat -= (5 + this.stars * 1.6) * dt;
-        if (this.heat < 0) this.heat = 0;
-        this.recount();
-      }
+    if (!seen && this.bustProgress > 0) {
+      this.bustProgress = Math.max(0, this.bustProgress - dt / 3.2);
     }
-    if (!seenByPolice) this.bustProgress = Math.max(0, this.bustProgress - dt * 0.5);
   }
 }
 
-const intersections = [];
-for (const gx of GRID_LINES) for (const gz of GRID_LINES) intersections.push({ x: gx, z: gz });
+// ------------------------------------------------------------ the fleet
+
+const MAX_CRUISERS = 5;
 
 export class PoliceSystem {
   constructor(gl, world) {
     this.gl = gl;
     this.world = world;
     this.cars = [];
-    this.rng = new Rng(31337);
-    this.lastKnown = null;
-    this.lastKnownAt = -99;
-    this.spawnCooldown = 0;
-    this.roadblock = []; // cruisers parked across a road, driver 'roadblock'
-    this.roadblockCooldown = 18; // the first one takes a while to organise
-  }
-
-  // Two cruisers parked nose-to-nose across an intersection ahead of
-  // the player: not a pursuit, a wall. They sit in this.cars like any
-  // cruiser — traffic brakes for them, ramming one is an offence, and
-  // their eyes report sightings — but they never start their engines.
-  setRoadblock(player) {
-    const options = intersections.filter((n) => {
-      const d = dist2d(player.x, player.z, n.x, n.z);
-      return d > 55 && d < 115;
-    });
-    if (!options.length) return;
-    const node = this.rng.pick(options);
-    // across the east–west avenue through the node, angled like a
-    // barrier that was placed in a hurry by people being shouted at
-    const spots = [
-      { x: node.x - 2.4, z: node.z + 1.6, heading: Math.PI / 2 + 0.42 },
-      { x: node.x + 2.4, z: node.z - 1.6, heading: Math.PI / 2 - 0.38 },
-    ];
-    for (const s of spots) {
-      const car = new Car(this.gl, 'sedan', 0xffffff, s.x, s.z, s.heading, { police: true, driver: 'roadblock' });
-      car.speed = 0;
-      this.cars.push(car);
-      this.roadblock.push(car);
-    }
-    this.roadblockCooldown = 45;
-  }
-
-  clearRoadblock() {
-    for (const car of this.roadblock) {
-      car.obj.visible = false;
-      const i = this.cars.indexOf(car);
-      if (i >= 0) this.cars.splice(i, 1);
-    }
     this.roadblock = [];
-    this.roadblockCooldown = 30;
+    this.lastKnown = null;
+    this.rng = new Rng(31337);
+    this.blockCooldown = 0;
+    this.spawnTimer = 0;
   }
 
-  desiredCount(stars) {
-    return stars; // one cruiser a star, up to five
-  }
-
-  spawnPoint(player) {
-    // an intersection 90-140 m away, so cruisers arrive, never pop in
-    const options = intersections.filter((n) => {
-      const d = dist2d(player.x, player.z, n.x, n.z);
-      return d > 85 && d < 150;
-    });
-    const hq = this.world.landmarks.police;
-    const n = options.length ? this.rng.pick(options) : { x: hq.x, z: hq.z };
-    return n;
-  }
-
-  update(dt, player, wanted, colliders, now) {
-    const target = this.desiredCount(wanted.stars);
-    this.spawnCooldown -= dt;
-    if (this.cars.length < target && this.spawnCooldown <= 0) {
-      const spot = this.spawnPoint(player);
-      const car = new Car(this.gl, 'sedan', 0xffffff, spot.x, spot.z, 0, { police: true, driver: 'police' });
-      car.fromNode = spot;
-      car.toNode = spot;
-      this.cars.push(car);
-      this.spawnCooldown = 2.5;
-    }
-    if (this.cars.length > target) {
-      // the farthest hunting cruiser gives up and peels away (a
-      // roadblock car is a wall, not a hunter: it never peels)
-      let far = null, fd = -1;
-      for (const c of this.cars) {
-        if (c.driver === 'roadblock') continue;
-        const d = dist2d(c.x, c.z, player.x, player.z);
-        if (d > fd) { fd = d; far = c; }
-      }
-      if (far && (fd > 60 || wanted.stars === 0)) {
-        far.obj.visible = false;
-        this.cars.splice(this.cars.indexOf(far), 1);
-      }
-    }
-
-    // roadblocks: at four stars the SPD stops chasing one car at a time
-    // and starts closing the board; below three, the wall comes down
-    this.roadblockCooldown -= dt;
-    if (wanted.stars >= 4 && this.roadblock.length === 0 && this.roadblockCooldown <= 0) {
-      this.setRoadblock(player);
-    }
-    if (wanted.stars <= 2 && this.roadblock.length) {
-      this.clearRoadblock();
-    }
-
-    // shared eyes: if any cruiser sees the player, all know where he is
-    let anySee = false;
+  nearestDistance(pos) {
+    let best = Infinity;
     for (const c of this.cars) {
-      const d = dist2d(c.x, c.z, player.x, player.z);
-      if (d < 60 && !losBlocked(colliders, c.x, c.z, player.x, player.z)) {
-        anySee = true;
-        break;
+      const d = dist2d(c.x, c.z, pos.x, pos.z);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+
+  // a fresh cruiser, or a quiet one pressed back into service
+  _obtainCruiser(pos) {
+    // prefer a car that is far away or parked at the depot: it can
+    // be repositioned without the player watching it pop
+    let spare = null;
+    for (const c of this.cars) {
+      if (c.mode === 'chase' || c.mode === 'block') continue;
+      if (dist2d(c.x, c.z, pos.x, pos.z) > 80) { spare = c; break; }
+      if (!spare) spare = c;
+    }
+    if (!spare && this.cars.length < MAX_CRUISERS) {
+      spare = new Car(this.gl, 'sedan', 0xffffff, 0, 0, 0, { police: true, driver: 'police' });
+      this.cars.push(spare);
+    }
+    return spare;
+  }
+
+  // where cruisers enter the hunt: on an avenue, a good run away
+  _spawnPoint(pos) {
+    const rng = this.rng;
+    for (let tries = 0; tries < 8; tries++) {
+      const vertical = rng.chance(0.5);
+      const line = rng.pick(GRID_LINES);
+      const along = clamp((vertical ? pos.z : pos.x) + rng.range(95, 145) * rng.sign(), -244, 244);
+      const x = vertical ? line - LANE_SIGN(pos, vertical, line) : along;
+      const z = vertical ? along : line - LANE_SIGN(pos, vertical, line);
+      if (dist2d(x, z, pos.x, pos.z) > 80) return { x, z };
+    }
+    return null;
+  }
+
+  _sendToDepot(car) {
+    car.mode = 'depot';
+    const hq = this.world.landmarks.police || { x: 0, z: -200 };
+    car.depotSpot = {
+      x: hq.x + this.rng.range(-16, 16),
+      z: hq.z + this.rng.range(2, 10),
+    };
+  }
+
+  // stand two cruisers across an intersection in front of the hunt:
+  // the crossing nearest the player that is still a real run ahead
+  _raiseRoadblock(pos) {
+    let best = null;
+    let bestD = Infinity;
+    for (const gx of GRID_LINES) {
+      for (const gz of GRID_LINES) {
+        const d = dist2d(gx, gz, pos.x, pos.z);
+        if (d > 42 && d < bestD) { bestD = d; best = { x: gx, z: gz }; }
       }
     }
-    if (anySee) {
-      this.lastKnown = { x: player.x, z: player.z };
-      this.lastKnownAt = now;
+    if (!best) return;
+    const blockers = [];
+    for (const c of this.cars) {
+      if (c.mode === 'chase' && blockers.length < 2) blockers.push(c);
     }
-    const memory = now - this.lastKnownAt < 6 ? this.lastKnown : null;
+    while (blockers.length < 2) {
+      const c = this._obtainCruiser(pos);
+      if (!c) break;
+      blockers.push(c);
+    }
+    if (blockers.length < 2) return;
+    // park them broadside across the avenue that runs along z at
+    // this crossing, noses east, a car's width apart
+    blockers[0].x = best.x - 2.3;
+    blockers[0].z = best.z;
+    blockers[1].x = best.x + 2.3;
+    blockers[1].z = best.z;
+    for (const c of blockers) {
+      c.mode = 'block';
+      c.heading = Math.PI / 2;
+      c.speed = 0;
+      c.syncObj();
+      this.roadblock.push(c);
+    }
+    this.blockCooldown = 14;
+  }
 
-    for (const car of this.cars) {
-      if (car.driver === 'roadblock') {
-        car.syncObj(); // parked across the road: lights turning, engine off
+  _dropRoadblock() {
+    for (const c of this.roadblock) {
+      if (c.mode === 'block') c.mode = 'chase';
+    }
+    this.roadblock.length = 0;
+  }
+
+  // the frame's work. pos: the player's ground position. Returns
+  // true when at least one cruiser has eyes on the player.
+  update(dt, pos, wanted, colliders, now) {
+    void now;
+    this.blockCooldown -= dt;
+    this.spawnTimer -= dt;
+    let seen = false;
+
+    // a cruiser handed to the system without orders (the photo-mode
+    // staging does exactly that) is simply on the hunt
+    for (const c of this.cars) {
+      if (!c.mode) c.mode = 'chase';
+    }
+
+    // ---- eyes: who can see the player right now?
+    for (const c of this.cars) {
+      c.seesPlayer = false;
+      if (c.mode !== 'chase' && c.mode !== 'block') continue;
+      const d = dist2d(c.x, c.z, pos.x, pos.z);
+      if (d < 78 && !losBlocked(colliders, c.x, c.z, pos.x, pos.z)) {
+        c.seesPlayer = true;
+        seen = true;
+      }
+    }
+    if (seen) this.lastKnown = { x: pos.x, z: pos.z };
+
+    // ---- the roadblock: raise it at four stars, drop it when the
+    // heat or the chase has moved on
+    if (wanted.stars >= 4 && this.roadblock.length === 0 && this.blockCooldown <= 0) {
+      this._raiseRoadblock(pos);
+    }
+    if (this.roadblock.length > 0) {
+      const anchor = this.roadblock[0];
+      if (wanted.stars < 3 || dist2d(anchor.x, anchor.z, pos.x, pos.z) > 175) {
+        this._dropRoadblock();
+      }
+    }
+
+    // ---- staffing: the stars decide how many cruisers hunt
+    const hunting = this.cars.filter((c) => c.mode === 'chase' || c.mode === 'block').length;
+    if (hunting < wanted.stars && this.spawnTimer <= 0) {
+      const c = this._obtainCruiser(pos);
+      if (c) {
+        const spot = this._spawnPoint(pos);
+        if (spot && dist2d(c.x, c.z, pos.x, pos.z) > 80) {
+          c.x = spot.x;
+          c.z = spot.z;
+        }
+        c.mode = 'chase';
+        c.memory = this.lastKnown ? { ...this.lastKnown } : null;
+        this.spawnTimer = 1.2;
+      }
+    }
+    if (wanted.stars === 0) {
+      for (const c of this.cars) {
+        if (c.mode === 'chase') this._sendToDepot(c);
+      }
+      if (this.roadblock.length > 0) this._dropRoadblock();
+    }
+
+    // ---- drive every cruiser
+    for (const c of this.cars) {
+      if (c.mode === 'block') {
+        c.speed = 0;
+        c.syncObj();
         continue;
       }
-      this.drivePolice(car, dt, player, memory, colliders);
+      if (c.mode === 'depot') {
+        // roll home to the HQ forecourt and park
+        const spot = c.depotSpot || this.world.landmarks.police || { x: 0, z: -200 };
+        if (dist2d(c.x, c.z, spot.x, spot.z) < 3) {
+          c.speed = 0;
+          c.syncObj();
+          continue;
+        }
+        this._driveToward(c, spot, dt, colliders, 11);
+        continue;
+      }
+      // chase: eyes on the player refresh the memory; without them
+      // the cruiser runs to the last known place and then searches
+      if (c.seesPlayer) c.memory = { x: pos.x, z: pos.z };
+      let target = c.memory;
+      if (!target) {
+        // never saw him: quarter the avenues at a patrol pace
+        if (!c.patrol || dist2d(c.x, c.z, c.patrol.x, c.patrol.z) < 9) {
+          c.patrol = {
+            x: this.rng.pick(GRID_LINES),
+            z: this.rng.pick(GRID_LINES),
+          };
+        }
+        target = c.patrol;
+      }
+      const d = dist2d(c.x, c.z, target.x, target.z);
+      const pace = c.seesPlayer ? 1.05 : 0.8;
+      const arrive = c.seesPlayer ? 3.2 : 6;
+      this._driveToward(c, target, dt, colliders, c.spec.maxSpeed * pace, d < arrive + 4 ? Math.max(0, (d - arrive)) * 1.4 : Infinity);
+      if (!c.seesPlayer && d < 7 && c.memory) {
+        // reached the last known place and he is not here: the
+        // memory is spent, fall back to searching
+        c.memory = null;
+      }
     }
-    return anySee;
+
+    // ---- separation: cruisers do not share a bonnet
+    for (let i = 0; i < this.cars.length; i++) {
+      for (let j = i + 1; j < this.cars.length; j++) {
+        const a = this.cars[i], b = this.cars[j];
+        const d = dist2d(a.x, a.z, b.x, b.z);
+        if (d > 0.01 && d < 3.4) {
+          const push = (3.4 - d) / 2;
+          const nx = (b.x - a.x) / d, nz = (b.z - a.z) / d;
+          if (a.mode !== 'block') { a.x -= nx * push; a.z -= nz * push; }
+          if (b.mode !== 'block') { b.x += nx * push; b.z += nz * push; }
+        }
+      }
+    }
+    return seen;
   }
 
-  drivePolice(car, dt, player, memory, colliders) {
-    const hunt = memory || player; // without a sighting they still converge on the player area slowly
-    const distToPlayer = dist2d(car.x, car.z, player.x, player.z);
-    let aimX, aimZ, cruise;
-    if (memory && distToPlayer < 36) {
-      // close pursuit: straight at the player, ready to ram
-      aimX = player.x;
-      aimZ = player.z;
-      cruise = 27;
-    } else {
-      // road pursuit: pick the neighbouring intersection that closes in
-      const to = car.toNode || car.fromNode;
-      const arrived = !to || dist2d(car.x, car.z, to.x, to.z) < 9;
-      if (arrived || !car.toNode) {
-        const from = to || intersections.reduce(
-          (best, n) => (dist2d(car.x, car.z, n.x, n.z) < dist2d(car.x, car.z, best.x, best.z) ? n : best),
-          intersections[0],
-        );
-        const options = intersections.filter(
-          (n) => (n.x === from.x || n.z === from.z) && n !== from &&
-            Math.abs(n.x - from.x) + Math.abs(n.z - from.z) === 90,
-        );
-        let best = options[0], bd = Infinity;
-        for (const n of options) {
-          const d = dist2d(n.x, n.z, hunt.x, hunt.z);
-          if (d < bd) { bd = d; best = n; }
-        }
-        car.fromNode = from;
-        car.toNode = best || from;
-      }
-      aimX = car.toNode.x;
-      aimZ = car.toNode.z;
-      cruise = memory ? 24 : 15;
+  // steer one cruiser toward a ground point at up to `pace` speed,
+  // easing to `easeTo` when close if a cap is given
+  _driveToward(car, target, dt, colliders, pace, easeTo = Infinity) {
+    const want = Math.atan2(target.x - car.x, target.z - car.z);
+    const turn = clamp(angleDelta(car.heading, want), -2.3 * dt, 2.3 * dt);
+    car.heading += turn;
+    let speed = pace;
+    if (easeTo !== Infinity) speed = Math.min(speed, easeTo);
+    // a car badly off the target's line slows to make the turn
+    if (Math.abs(angleDelta(car.heading, want)) > 1.1) speed = Math.min(speed, 6);
+    const accel = speed > car.speed ? car.spec.accel * 0.9 : 18;
+    car.speed += clamp(speed - car.speed, -accel * dt, accel * dt);
+    car.x += Math.sin(car.heading) * car.speed * dt;
+    car.z += Math.cos(car.heading) * car.speed * dt;
+    const fixed = collideBuildings(colliders, car.x, car.z, 1.7);
+    if (fixed.x !== car.x || fixed.z !== car.z) {
+      car.x = fixed.x;
+      car.z = fixed.z;
+      car.speed *= 0.35;
     }
-    const want = Math.atan2(aimX - car.x, aimZ - car.z);
-    const delta = angleDelta(car.heading, want);
-    car.steer = clamp(delta * 1.8, -0.6, 0.6);
-    car.heading += car.steer * dt * clamp(Math.abs(car.speed) / 6, 0.4, 1.7) * Math.sign(car.speed || 1);
-    const accel = cruise > car.speed ? 15 : 20;
-    car.speed += clamp(cruise - car.speed, -accel * dt, accel * dt);
-    const [fx, fz] = car.forward();
-    let nx = car.x + fx * car.speed * dt;
-    let nz = car.z + fz * car.speed * dt;
-    [nx, nz] = collideBuildings(colliders, nx, nz, 1.7);
-    if ((nx !== car.x + fx * car.speed * dt || nz !== car.z + fz * car.speed * dt) && Math.abs(car.speed) > 8) {
-      car.speed = -car.speed * 0.2;
-      car.stuckTimer = 0.6;
-    }
-    if (car.stuckTimer > 0) {
-      car.stuckTimer -= dt;
-      car.speed = -6; // back out of whatever they hit
-      nx = car.x - fx * 6 * dt;
-      nz = car.z - fz * 6 * dt;
-    }
-    car.x = nx;
-    car.z = nz;
+    car.steerVis = clamp(turn * 2.2, -0.4, 0.4);
     car.syncObj();
   }
+}
 
-  nearestDistance(player) {
-    let d = Infinity;
-    for (const c of this.cars) d = Math.min(d, dist2d(c.x, c.z, player.x, player.z));
-    return d;
-  }
+// which side of an avenue the entering cruiser belongs on is a
+// detail the spawn can afford to be casual about — it joins the
+// hunt from a standstill of nobody's attention — but it should at
+// least start on the road, so the offset is one lane, signed by
+// which side of the player it is coming from
+function LANE_SIGN(pos, vertical, line) {
+  const across = vertical ? pos.x : pos.z;
+  return (across - line) >= 0 ? -3.3 : 3.3;
 }

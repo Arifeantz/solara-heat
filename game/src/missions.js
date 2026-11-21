@@ -192,6 +192,98 @@ export const SIDE_DEFS = [
       },
     ],
   },
+  // ---------------------------------------------------------- round five
+  //
+  // Two more jobs join the rotation with the re-implementation.
+  // Night Freight is the island before dawn: ice, fish, a ferry
+  // that will not wait, and a harbormaster who signs in triplicate.
+  // Bay Six is the opposite hour entirely — a bunch of flowers, a
+  // hospital ward, and a husband who has been rehearsing a thank-you
+  // in a hotel lobby for three days. Both run on the same machinery
+  // as every other side job: a route of landmark keys, a clock per
+  // leg, and Marina on the phone being Marina about it.
+  {
+    id: 'nightfreight',
+    kind: 'side',
+    title: 'Night Freight',
+    reward: 380,
+    intro: [
+      ['Marina', 'Dario, wake up. No — stay asleep, drive asleep, it is all the same to the fish market. Their ice machine died at midnight.'],
+      ['Marina', 'The catch is packed in the last of the ice and the night ferry at the docks loads in twenty minutes. If it misses the ferry it is worth nothing by morning.'],
+      ['Marina', 'Collect the crates at the fish market, run them to the ferry, then take the harbormaster his copy of the manifest at the marina office. He will not sign the copy he already has. Do not ask.'],
+    ],
+    done: 'Signed, stamped, and smelling faintly of snapper. The ferry took the catch and the harbormaster took the credit, which is the correct order of things.',
+    legTimer: 140,
+    route: [
+      {
+        key: 'fishmarket', label: 'Fish Market', r: 9,
+        text: 'Collect the crates at the fish market — the ice is melting',
+        say: [
+          ['Market Porter', 'Twelve crates, driver. Twelve. If one is warm when it lands, the whole harbour hears about it by breakfast.'],
+          ['Market Porter', 'Drive like the ice is your own money. It is, a little. Marina explained nothing? She does that.'],
+        ],
+      },
+      {
+        key: 'docks', label: 'The Docks', r: 11,
+        text: 'Get the catch to the night ferry at the docks',
+        say: [
+          ['Ferry Hand', 'Down the ramp, easy — EASY. There. Twelve crates, cold as sermons. The captain owes Marina a favour the size of this boat.'],
+        ],
+      },
+      {
+        key: 'marina', label: 'Marina Office', r: 9,
+        text: 'Take the manifest copy to the harbormaster at the marina',
+        say: [
+          ['Harbormaster', 'The copy. Finally. A manifest in triplicate is a manifest that exists, driver. In duplicate it is merely a rumour with paperwork.'],
+        ],
+      },
+    ],
+  },
+  {
+    id: 'bayflowers',
+    kind: 'side',
+    title: 'Bay Six',
+    reward: 290,
+    intro: [
+      ['Marina', 'A different kind of urgent, Dario. Rosa at the café has a bunch of marina lilies with a card that just says "Bay Six".'],
+      ['Marina', 'Bay Six is a ward at the hospital. The lady in it has been asking the nurses whether anybody came. Three days, Dario. Nobody came.'],
+      ['Marina', 'Take the flowers to the hospital. Then — her husband is at the Hotel Solana, too proud to walk in empty-handed and too shy to walk in at all. Collect him. Bring him to the statue in Palmera Park first; he wants to practise what to say to a bench, like a normal man.'],
+    ],
+    done: 'He said it to the bench, then he said it to her. The nurses pretended not to listen and listened completely. Bay Six has flowers.',
+    legTimer: 125,
+    route: [
+      {
+        key: 'cafe', label: 'Café Solmar', r: 8,
+        text: 'Collect the lilies from Rosa at Café Solmar',
+        say: [
+          ['Rosa', 'Marina lilies. They only open at dusk, which the lady will say is showing off. The card is hers to read, not yours, driver.'],
+          ['Rosa', 'And tell the husband from me: three days is long enough to be proud. Go.'],
+        ],
+      },
+      {
+        key: 'hospital', label: 'Solana Heights Hospital', r: 10,
+        text: 'Deliver the lilies to Bay Six at the hospital',
+        say: [
+          ['Ward Nurse', 'Bay Six? For her? Oh — oh, finally. Leave them with me and I will carry them in like they are made of weather. She has been asking, you know.'],
+        ],
+      },
+      {
+        key: 'hotel', label: 'Hotel Solana', r: 10,
+        text: 'Collect the husband at the Hotel Solana',
+        say: [
+          ['The Husband', 'I bought a shirt. Three days I have been buying shirts. A man cannot walk into a hospital in the wrong shirt, that is what I told myself.'],
+          ['The Husband', 'The park first, driver. The statue. I have a speech and the statue has never once interrupted anybody.'],
+        ],
+      },
+      {
+        key: 'park', label: 'Palmera Park', r: 9,
+        text: 'Take him to the statue in Palmera Park to practise',
+        say: [
+          ['The Husband', '"I am sorry I was proud." There. The general approves. Now — the hospital, driver, before the shirt and I both lose our nerve.'],
+        ],
+      },
+    ],
+  },
 ];
 
 export class Missions {

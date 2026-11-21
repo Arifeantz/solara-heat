@@ -1,153 +1,200 @@
-// textures.js — every texture in Solara Heat is painted on a canvas at load.
+// textures.js — the game's six painted surfaces, drawn in code.
 //
-// No image files ship with the game: facades with lit windows, a beach-umbrella
-// stripe, asphalt grain and the water sparkle are all drawn here with plain
-// canvas 2D, then uploaded by the engine as WebGL textures.
+// There are no image files in Solara Heat. Each texture is a small
+// RGBA pixel buffer painted by hand here — window grids for tower
+// facades, a striped awning and shopfront glass for the retail
+// builder, speckled asphalt, beach sand, brick courses, and a soft
+// radial glow for lamps and the lighthouse beam. The Renderer uploads
+// each buffer once at boot; the geometry builders then repeat them
+// across walls and ground by scaling their uv rectangles.
+//
+// Every buffer is painted deterministically (a tiny local generator,
+// never Math.random), and row 0 of a buffer is the TOP of the surface
+// as it appears in the world: the facade's parapet band is at the top
+// of its buffer, the shop's awning likewise.
 
-function makeCanvas(w, h) {
-  const c = document.createElement('canvas');
-  c.width = w;
-  c.height = h;
-  return c;
-}
-
-// A tower facade: warm plaster with a grid of windows, some of them lit.
-// tint is multiplied in the shader through the vertex colour, so one texture
-// serves every pastel tower in the city.
-export function facadeTexture() {
-  const c = makeCanvas(256, 256);
-  const g = c.getContext('2d');
-  g.fillStyle = '#f5efe4';
-  g.fillRect(0, 0, 256, 256);
-  // faint plaster streaks
-  g.fillStyle = 'rgba(190,170,140,0.12)';
-  for (let i = 0; i < 40; i++) {
-    g.fillRect(Math.random() * 256, Math.random() * 256, 2, 14 + Math.random() * 30);
-  }
-  const cols = 6, rows = 8;
-  const ww = 256 / cols, hh = 256 / rows;
-  for (let x = 0; x < cols; x++) {
-    for (let y = 0; y < rows; y++) {
-      const px = x * ww + ww * 0.24;
-      const py = y * hh + hh * 0.2;
-      const w = ww * 0.52, h = hh * 0.58;
-      const lit = Math.random() < 0.24;
-      g.fillStyle = lit ? '#ffd98a' : '#3d5a68';
-      g.fillRect(px, py, w, h);
-      g.fillStyle = 'rgba(255,255,255,0.35)';
-      g.fillRect(px, py, w, h * 0.3);
-      g.fillStyle = 'rgba(30,40,50,0.55)';
-      g.fillRect(px, py + h - 2, w, 2);
-    }
-  }
-  return c;
-}
-
-// Low-rise shopfront facade: awning stripe along the bottom, bigger windows.
-export function shopTexture() {
-  const c = makeCanvas(256, 128);
-  const g = c.getContext('2d');
-  g.fillStyle = '#f8f2e6';
-  g.fillRect(0, 0, 256, 128);
-  for (let x = 0; x < 4; x++) {
-    g.fillStyle = '#46606e';
-    g.fillRect(14 + x * 62, 18, 46, 44);
-    g.fillStyle = 'rgba(255,255,255,0.3)';
-    g.fillRect(14 + x * 62, 18, 46, 14);
-  }
-  // awning
-  for (let i = 0; i < 16; i++) {
-    g.fillStyle = i % 2 ? '#e4572e' : '#fdf6ec';
-    g.fillRect(i * 16, 74, 16, 18);
-  }
-  g.fillStyle = '#5d4a38';
-  g.fillRect(0, 96, 256, 32);
-  g.fillStyle = '#2e2a26';
-  g.fillRect(20, 100, 60, 28);
-  g.fillRect(110, 100, 60, 28);
-  g.fillRect(200, 100, 40, 28);
-  return c;
-}
-
-// Asphalt with a little grain, used on every road quad.
-export function asphaltTexture() {
-  const c = makeCanvas(128, 128);
-  const g = c.getContext('2d');
-  g.fillStyle = '#4a4a50';
-  g.fillRect(0, 0, 128, 128);
-  for (let i = 0; i < 900; i++) {
-    const v = 60 + Math.random() * 30;
-    g.fillStyle = `rgba(${v},${v},${v + 8},0.5)`;
-    g.fillRect(Math.random() * 128, Math.random() * 128, 1.6, 1.6);
-  }
-  return c;
-}
-
-// Sand with speckles for the beach strip.
-export function sandTexture() {
-  const c = makeCanvas(128, 128);
-  const g = c.getContext('2d');
-  g.fillStyle = '#ecd9a8';
-  g.fillRect(0, 0, 128, 128);
-  for (let i = 0; i < 500; i++) {
-    g.fillStyle = Math.random() < 0.5 ? 'rgba(200,170,110,0.5)' : 'rgba(255,246,214,0.5)';
-    g.fillRect(Math.random() * 128, Math.random() * 128, 2, 2);
-  }
-  return c;
-}
-
-// Old-town brickwork for the university quarter: warm red-brown courses
-// with pale mortar, a few bricks burnt darker, and the grime of a wall
-// that has stood by the sea for ninety years. One tile holds eight
-// courses; the builder scales its uv so the bricks stay brick-sized.
-export function brickTexture() {
-  const c = makeCanvas(256, 256);
-  const g = c.getContext('2d');
-  g.fillStyle = '#c8b8a2'; // mortar
-  g.fillRect(0, 0, 256, 256);
-  const courseH = 32; // eight courses per tile
-  const brickW = 62;
-  const tones = ['#a55a41', '#9c5138', '#b06244', '#8f4a34', '#a85f43', '#7e4230'];
-  let seed = 41;
-  const rnd = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return seed / 0x7fffffff;
+// a pocket deterministic generator for speckle and scatter
+function painter(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+    return s / 4294967296;
   };
-  for (let row = 0; row < 256 / courseH; row++) {
-    const y = row * courseH;
-    const offset = row % 2 ? -brickW / 2 : 0; // running bond
-    for (let x = offset; x < 256; x += brickW) {
-      const tone = tones[Math.floor(rnd() * tones.length)];
-      g.fillStyle = tone;
-      g.fillRect(x + 2, y + 2, brickW - 4, courseH - 4);
-      // a kiln blush on the top face and wear along the bottom edge
-      g.fillStyle = 'rgba(255,220,180,0.16)';
-      g.fillRect(x + 2, y + 2, brickW - 4, 5);
-      g.fillStyle = 'rgba(40,20,10,0.20)';
-      g.fillRect(x + 2, y + courseH - 7, brickW - 4, 3);
-      if (rnd() < 0.12) {
-        g.fillStyle = 'rgba(30,26,24,0.35)';
-        g.fillRect(x + 6 + rnd() * 30, y + 6 + rnd() * 14, 12, 7);
-      }
-    }
-  }
-  // salt streaks bleeding down from the top of the wall
-  g.fillStyle = 'rgba(240,238,228,0.10)';
-  for (let i = 0; i < 12; i++) {
-    g.fillRect(rnd() * 256, 0, 3 + rnd() * 4, 60 + rnd() * 120);
-  }
-  return c;
 }
 
-// Soft radial sparkle used for the mission beacon glow sprite.
+// one pixel buffer with the few brushes the painters share
+function canvas(w, h, rgb) {
+  const data = new Uint8Array(w * h * 4);
+  const img = {
+    width: w,
+    height: h,
+    data,
+    set(x, y, r, g, b, a = 255) {
+      if (x < 0 || y < 0 || x >= w || y >= h) return;
+      const i = (y * w + x) * 4;
+      data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = a;
+    },
+    fill(x0, y0, x1, y1, r, g, b, a = 255) {
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) img.set(x, y, r, g, b, a);
+      }
+    },
+    speckle(count, rng, shades) {
+      for (let i = 0; i < count; i++) {
+        const x = Math.floor(rng() * w);
+        const y = Math.floor(rng() * h);
+        const c = shades[Math.floor(rng() * shades.length)];
+        img.set(x, y, c[0], c[1], c[2]);
+      }
+    },
+  };
+  img.fill(0, 0, w, h, rgb[0], rgb[1], rgb[2]);
+  return img;
+}
+
+// ------------------------------------------------------------ facade
+// A tower wall, tinted by the vertex colour of whatever building
+// wears it: the buffer itself stays near-white so the tint reads.
+// A parapet shadow band runs along the top; below it a strict grid
+// of windows, most of them blue-grey glass, a few lit warm, one or
+// two open to the dark.
+export function facadeTexture() {
+  const img = canvas(128, 128, [238, 236, 230]);
+  const rng = painter(41);
+  img.fill(0, 0, 128, 7, 176, 172, 164); // the parapet shadow
+  img.fill(0, 7, 128, 9, 214, 210, 200);
+  const cols = 4, rows = 6;
+  const cw = 128 / cols, ch = (128 - 12) / rows;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const x = Math.floor(c * cw + cw * 0.24);
+      const y = Math.floor(12 + r * ch + ch * 0.18);
+      const w = Math.floor(cw * 0.52), h = Math.floor(ch * 0.6);
+      const roll = rng();
+      if (roll < 0.14) img.fill(x, y, x + w, y + h, 250, 205, 120); // lit
+      else if (roll < 0.2) img.fill(x, y, x + w, y + h, 52, 58, 66); // open
+      else img.fill(x, y, x + w, y + h, 96, 128, 148); // glass
+      // a pale sill and a glint across the glass
+      img.fill(x - 1, y + h, x + w + 1, y + h + 2, 198, 194, 186);
+      img.fill(x + 2, y + 2, x + w - 4, y + 4, 226, 240, 244);
+    }
+  }
+  img.speckle(260, rng, [[228, 224, 216], [246, 244, 238], [206, 202, 194]]);
+  return img;
+}
+
+// ------------------------------------------------------------ shop
+// A ground-floor storefront: a striped awning across the top, tall
+// display glass beneath it, a door at the right with a brass handle,
+// and a tiled step along the bottom.
+export function shopTexture() {
+  const img = canvas(128, 128, [240, 234, 222]);
+  const rng = painter(97);
+  // the awning: alternating coral and cream slats, a scalloped hem
+  for (let x = 0; x < 128; x += 16) {
+    img.fill(x, 0, x + 8, 30, 214, 84, 62);
+    img.fill(x + 8, 0, x + 16, 30, 246, 238, 224);
+  }
+  img.fill(0, 30, 128, 34, 120, 60, 48);
+  for (let x = 0; x < 128; x += 16) img.fill(x, 30, x + 8, 38, 214, 84, 62);
+  // display glass: two broad panes with goods hinted behind them
+  img.fill(8, 48, 62, 108, 88, 122, 140);
+  img.fill(68, 48, 96, 108, 80, 114, 134);
+  img.fill(12, 84, 58, 92, 233, 196, 106); // a shelf of bright tins
+  img.fill(12, 96, 58, 102, 188, 84, 70);
+  img.fill(72, 78, 92, 88, 120, 176, 120);
+  img.fill(10, 50, 60, 54, 230, 242, 246); // the sky in the glass
+  img.fill(70, 50, 94, 54, 230, 242, 246);
+  // the door: deep teal, a glass top, a brass knob
+  img.fill(102, 44, 122, 112, 28, 92, 102);
+  img.fill(106, 48, 118, 74, 140, 180, 192);
+  img.fill(108, 84, 110, 88, 240, 200, 90);
+  // the tiled step and a worn threshold line
+  img.fill(0, 112, 128, 128, 172, 158, 138);
+  for (let x = 0; x < 128; x += 16) img.fill(x, 112, x + 1, 128, 140, 126, 106);
+  img.speckle(160, rng, [[232, 226, 210], [248, 244, 232]]);
+  return img;
+}
+
+// ------------------------------------------------------------ asphalt
+// Road surface: a near-black blue-grey, aggregate speckle, the odd
+// sealed crack and oil stain. It repeats hard across the avenues, so
+// nothing in it may draw the eye twice the same way.
+export function asphaltTexture() {
+  const img = canvas(128, 128, [52, 54, 58]);
+  const rng = painter(7);
+  img.speckle(2400, rng, [[64, 66, 70], [44, 46, 50], [74, 76, 80], [58, 60, 64]]);
+  // two tar-sealed cracks wandering the tile
+  for (const startX of [22, 88]) {
+    let x = startX;
+    for (let y = 0; y < 128; y += 4) {
+      x += Math.floor(rng() * 5) - 2;
+      img.fill(x, y, x + 2, y + 4, 34, 35, 38);
+    }
+  }
+  // one soft oil stain
+  for (let y = 84; y < 104; y++) {
+    for (let x = 92; x < 116; x++) {
+      const dx = x - 104, dy = y - 94;
+      if (dx * dx + dy * dy < 110) img.set(x, y, 40, 41, 46);
+    }
+  }
+  return img;
+}
+
+// ------------------------------------------------------------ sand
+// Beach sand for the island's base: warm pale grains, darker flecks,
+// and the faintest wind ripples running one way.
+export function sandTexture() {
+  const img = canvas(128, 128, [226, 204, 164]);
+  const rng = painter(23);
+  img.speckle(1800, rng, [[236, 218, 182], [214, 190, 148], [206, 182, 138], [240, 226, 196]]);
+  for (let y = 6; y < 128; y += 11) {
+    for (let x = 0; x < 128; x++) {
+      const wave = Math.sin((x + y * 2) * 0.22) > 0.55;
+      if (wave) img.set(x, y, 216, 194, 152);
+    }
+  }
+  return img;
+}
+
+// ------------------------------------------------------------ brick
+// Brick courses for the library and the older blocks: warm reds with
+// a paler mortar, each course offset half a brick from the last.
+export function brickTexture() {
+  const img = canvas(128, 128, [188, 178, 168]); // mortar
+  const rng = painter(59);
+  const bh = 10, bw = 30;
+  for (let row = 0; row * bh < 128; row++) {
+    const off = row % 2 ? bw / 2 : 0;
+    for (let col = -1; col * bw < 128 + bw; col++) {
+      const x = Math.floor(col * bw + off);
+      const y = row * bh;
+      const tone = 0.88 + rng() * 0.24;
+      const r = Math.floor(168 * tone), g = Math.floor(84 * tone), b = Math.floor(66 * tone);
+      img.fill(x + 1, y + 1, x + bw - 1, y + bh - 1, r, g, b);
+      img.fill(x + 2, y + 2, x + bw - 3, y + 3, Math.min(255, r + 26), Math.min(255, g + 18), Math.min(255, b + 12));
+    }
+  }
+  img.speckle(300, rng, [[176, 164, 152], [198, 188, 176]]);
+  return img;
+}
+
+// ------------------------------------------------------------ glow
+// A soft radial disc, white at the heart and gone at the rim: lamp
+// heads, the lighthouse lamp, anything that should bloom a little
+// against the dusk. The colour comes from the vertex colour of the
+// geometry that wears it.
 export function glowTexture() {
-  const c = makeCanvas(64, 64);
-  const g = c.getContext('2d');
-  const grad = g.createRadialGradient(32, 32, 2, 32, 32, 32);
-  grad.addColorStop(0, 'rgba(255,255,255,0.9)');
-  grad.addColorStop(0.4, 'rgba(255,255,255,0.35)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  return c;
+  const img = canvas(64, 64, [0, 0, 0]);
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 64; x++) {
+      const dx = x - 31.5, dy = y - 31.5;
+      const d = Math.sqrt(dx * dx + dy * dy) / 32;
+      const v = Math.max(0, 1 - d);
+      const glow = Math.floor(255 * v * v * (3 - 2 * v));
+      img.set(x, y, glow, glow, glow);
+    }
+  }
+  return img;
 }

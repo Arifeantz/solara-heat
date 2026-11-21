@@ -507,6 +507,27 @@ export function buildAirport(gl, textures) {
   rotor.rot = [0, -0.35, 0];
   group.add(rotor);
 
+  // ---- a fourth living detail, added with the re-implementation:
+  // the windsock by the runway threshold. Its pole is baked like
+  // any other post, but the sock itself is a child on a pivot at
+  // the pole's top, so it can swing with the wind's slow changes
+  // of mind and flutter in the gusts off the sea. Two tapered
+  // sections — orange, then white — because a sock you cannot read
+  // at a glance is just a flag with ambitions.
+  const sockPole = new GeoBuilder();
+  sockPole.cylinder(0, 3, 0, 0.09, 0.12, 6, 6, hexColor(0x3a3f47));
+  sockPole.cylinder(0, 0.25, 0, 0.7, 0.9, 0.5, 8, hexColor(0x565d66));
+  const sockBase = new Obj(sockPole.build(gl));
+  sockBase.pos = [60, 0, -252];
+  group.add(sockBase);
+  colliders.push({ minX: 59.2, maxX: 60.8, minZ: -252.8, maxZ: -251.2 });
+  const sockGeo = new GeoBuilder();
+  sockGeo.cylinder(0, 0.55, 0, 0.3, 0.45, 1.1, 8, hexColor(0xff7847));
+  sockGeo.cylinder(0, 1.65, 0, 0.07, 0.3, 1.1, 8, hexColor(0xf2f0eb));
+  const sock = new Obj(sockGeo.build(gl));
+  sock.pos = [0, 6.1, 0]; // at the pole's top, in the base's frame
+  sockBase.add(sock);
+
   return {
     group,
     colliders,
@@ -517,6 +538,12 @@ export function buildAirport(gl, textures) {
       radar.rot[1] = now * 0.9;
       beacon.visible = now % 1.8 < 1.0;
       rotor.rot[1] = -0.35 + now * 2.4;
+      // the wind veers slowly and the sock follows, hanging a
+      // little lower whenever the gust eases
+      sockBase.rot[1] = 0.8 + Math.sin(now * 0.13) * 0.6;
+      const gust = 0.5 + 0.5 * Math.sin(now * 0.9) * Math.sin(now * 0.37);
+      sock.rot[2] = -1.62 - gust * 0.22 + Math.sin(now * 6.3) * 0.03;
+      sock.scale = [1, 0.82 + gust * 0.26, 1];
     },
   };
 }

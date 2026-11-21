@@ -21,6 +21,7 @@
   #cluster { position: absolute; right: 22px; top: 16px; text-align: right; }
   #money { font-size: 30px; font-weight: 800; letter-spacing: .5px; text-shadow: 0 2px 6px rgba(0,0,0,.65); color: #aef29a; }
   #stars { font-size: 26px; letter-spacing: 3px; min-height: 32px; }
+  #postcards { font-size: 17px; font-weight: 700; letter-spacing: .5px; color: #e8f2ff; text-shadow: 0 2px 6px rgba(0,0,0,.65); min-height: 22px; }
   #healthwrap { width: 190px; height: 13px; margin-left: auto; background: rgba(0,0,0,.45); border: 2px solid rgba(255,255,255,.65); border-radius: 7px; overflow: hidden; }
   #healthfill { height: 100%; width: 100%; background: #7ac74f; transition: width .25s; }
   #speed {
@@ -122,6 +123,7 @@
   <div id="cluster">
     <div id="money">$0</div>
     <div id="stars">☆☆☆☆☆</div>
+    <div id="postcards">✉ 0/25</div>
     <div id="healthwrap"><div id="healthfill"></div></div>
   </div>
   <div id="bustwrap">
@@ -179,7 +181,8 @@
       'At four stars the police stop chasing and start walling: watch for two cruisers parked across an intersection.',
       'The runway is 470 metres of empty asphalt. The Night Flight clock knows it. So does a Vandal GT.',
       'A gamepad works too: left stick to steer, triggers to drive, Y answers the CabCo phone.',
-      'On a weak graphics card, press C in game to lighten the render quality without shrinking the window.'
+      'On a weak graphics card, press C in game to lighten the render quality without shrinking the window.',
+      'Twenty-five postcards are hidden at the island\u2019s landmarks \u2014 a cream card on a post over a gold ring. Walk or drive up to one to collect it; the full album pays $1,000.'
     ];
     var i = 0;
     var el = document.getElementById('tiptext');

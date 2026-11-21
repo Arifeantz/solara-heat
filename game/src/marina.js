@@ -249,6 +249,29 @@ export function buildMarina(gl, textures) {
   buoyB.pos = [286, 0, 130];
   group.add(buoyB);
 
+  // ---- two moored sailboats, added with the re-implementation:
+  // hulls, cabins and tall bare masts, riding at anchor in the
+  // basin. They are scene children rather than baked geometry
+  // because water is not a floor — a boat that cannot rock is a
+  // building with a mast, and the basin already has buildings.
+  const sailboatGeo = (hullHex) => {
+    const b = new GeoBuilder();
+    b.box(0, 0.35, 0, 5.6, 0.7, 1.7, hexColor(hullHex)); // the hull
+    b.box(2.95, 0.42, 0, 0.9, 0.5, 1.1, hexColor(hullHex)); // the bow
+    b.box(-0.4, 0.95, 0, 2.2, 0.55, 1.2, hexColor(0xf2f0eb)); // the cabin
+    b.cylinder(0.5, 4.4, 0, 0.06, 0.09, 8.8, 6, hexColor(0x8a6f4d)); // the mast
+    b.box(-1.1, 1.6, 0, 3.4, 0.07, 0.07, hexColor(0x8a6f4d)); // the boom, sail furled
+    return b.build(gl);
+  };
+  const sailA = new Obj(sailboatGeo(0x2a9d8f));
+  sailA.pos = [278, 0, 62];
+  sailA.rot = [0, 0.35, 0];
+  group.add(sailA);
+  const sailB = new Obj(sailboatGeo(0xe4572e));
+  sailB.pos = [280, 0, -8];
+  sailB.rot = [0, -0.2, 0];
+  group.add(sailB);
+
   return {
     group,
     colliders,
@@ -260,6 +283,14 @@ export function buildMarina(gl, textures) {
       buoyA.rot[2] = Math.sin(now * 0.9) * 0.08;
       buoyB.pos[1] = Math.sin(now * 1.3 + 2.1) * 0.16;
       buoyB.rot[0] = Math.cos(now * 0.8) * 0.08;
+      // the sailboats ride the same swell as the buoys, slower and
+      // heavier, and swing a degree or two around their moorings
+      sailA.pos[1] = Math.sin(now * 0.8 + 0.6) * 0.12;
+      sailA.rot[2] = Math.sin(now * 0.62) * 0.035;
+      sailA.rot[1] = 0.35 + Math.sin(now * 0.21) * 0.05;
+      sailB.pos[1] = Math.sin(now * 0.8 + 2.4) * 0.12;
+      sailB.rot[2] = Math.sin(now * 0.62 + 1.3) * 0.035;
+      sailB.rot[1] = -0.2 + Math.sin(now * 0.18 + 2) * 0.05;
     },
   };
 }

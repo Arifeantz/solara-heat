@@ -106,10 +106,62 @@ function copyTree(from: string, to: string, tree: string): { files: number; byte
   return { files, bytes };
 }
 
+// The screenshot manifest: the hand-in promises exactly these four
+// frames, by name — a police chase, the open road, a live mission,
+// and the town on foot. They are regenerated from the running game
+// for every round, and this check is what keeps a stale, missing or
+// wrong-format frame from shipping in their place: each file must
+// exist, carry the JPEG magic bytes, and hold a real photograph's
+// weight — more than a blank frame's few kilobytes, never more
+// than the dossier's per-screenshot cap.
+const EXPECTED_SCREENSHOTS = ['1-chase.jpg', '2-drive.jpg', '3-mission.jpg', '4-foot.jpg'];
+
+function validateScreenshots(src: string): void {
+  const dir = join(src, 'screenshots');
+  const present = existsSync(dir) ? readdirSync(dir).sort() : [];
+  const expected = EXPECTED_SCREENSHOTS.slice().sort();
+  if (present.length !== expected.length || present.some((f, i) => f !== expected[i])) {
+    throw new Error(
+      `screenshots/: expected exactly ${expected.join(', ')} — found ${present.join(', ') || 'nothing'}`,
+    );
+  }
+  for (const name of EXPECTED_SCREENSHOTS) {
+    const data = readFileSync(join(dir, name));
+    const isJpeg = data.length > 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
+    if (!isJpeg) throw new Error(`screenshots/${name}: not a JPEG (bad magic bytes)`);
+    if (data.length < 8192) {
+      throw new Error(`screenshots/${name}: only ${data.length} bytes — a real frame weighs more`);
+    }
+    if (data.length > CAPS.screenshots.max_bytes) {
+      throw new Error(`screenshots/${name}: ${data.length} bytes exceeds the ${CAPS.screenshots.max_bytes}-byte cap`);
+    }
+    console.log(`  screenshots/${name} — manifest ok, ${data.length} bytes`);
+  }
+}
+
+// The game's own entry points, by name: the page and the module it
+// boots. A tree that lost either one is not a game, and the hand-in
+// should say so itself rather than leave the scorer to find out.
+function validateGameTree(src: string): void {
+  for (const rel of ['index.html', 'src/main.js']) {
+    if (!existsSync(join(src, 'game', rel))) {
+      throw new Error(`game/${rel}: missing — the shipped game has no way in`);
+    }
+  }
+  console.log('  game/index.html + game/src/main.js — entry points present');
+}
+
 function main(): void {
   const src = sourceRoot();
   const out = outputRoot();
   mkdirSync(out, { recursive: true });
+
+  // Validate before shipping: the screenshot manifest and the
+  // game's entry points are promises the dossier should not have
+  // to make on faith.
+  console.log('validating the hand-in:');
+  validateScreenshots(src);
+  validateGameTree(src);
 
   // Ship the two trees first: the dossier describes the output directory,
   // so it is built only once the copies are in place.
@@ -138,9 +190,23 @@ function main(): void {
       const a = lstatSync(join(src, tree, rel)).size;
       const b = lstatSync(join(out, tree, rel)).size;
       if (a !== b) throw new Error(`${tree}/${rel}: shipped ${b} bytes, source holds ${a}`);
+      // Size alone would wave a same-length corruption through, so
+      // the mirror check also compares a rolling byte hash of both
+      // copies. It is not cryptography — it is a tripwire, priced at
+      // one pass over bytes this program has already read once.
+      const hash = (data: Buffer): number => {
+        let h = 5381;
+        for (let i = 0; i < data.length; i++) h = ((h * 33) ^ data[i]) >>> 0;
+        return h;
+      };
+      const srcHash = hash(readFileSync(join(src, tree, rel)));
+      const outHash = hash(readFileSync(join(out, tree, rel)));
+      if (srcHash !== outHash) {
+        throw new Error(`${tree}/${rel}: shipped copy's bytes differ from the source (hash ${outHash} != ${srcHash})`);
+      }
     }
   }
-  console.log(`copies verified: ${totalFiles} files mirror the source trees exactly`);
+  console.log(`copies verified: ${totalFiles} files mirror the source trees exactly, bytes and all`);
 
   // The dossier, from the kit library, over what was just shipped.
   const dossier = buildDossier(out, CAPS);

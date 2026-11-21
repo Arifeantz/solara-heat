@@ -34,3 +34,9 @@ third-party code, art, audio or other assets are included; the one
 exception is vendor/makefun-game.ts, the make.fun kit's own dossier
 library, included unchanged as the bounty requires and governed by
 its own terms as distributed with that kit.
+
+The twenty-five Solana postcards and their messages (game/src/
+collect.js) are likewise original text written for this project, as
+are the side jobs Night Freight and Bay Six. The core game modules
+were re-implemented in the project's fifth round; the re-written
+code is new work by the same hand and carries this same license.
