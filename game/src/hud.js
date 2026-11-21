@@ -70,6 +70,30 @@ export class Hud {
     g.strokeStyle = '#e6d3ac';
     g.lineWidth = 5;
     g.beginPath(); g.moveTo(bx0, pz); g.lineTo(bx1, pz); g.stroke();
+    // the airfield on the north shore: its grass, the runway strip, the
+    // terminal block — small, but a pilot's eye should find them
+    const [ax0, az0] = this.worldToMap(-248, -298, size);
+    const [ax1, az1] = this.worldToMap(248, -216, size);
+    g.fillStyle = '#7d9b6a';
+    g.fillRect(ax0, az0, ax1 - ax0, az1 - az0);
+    const [rx0, rz0] = this.worldToMap(-235, -290, size);
+    const [rx1, rz1] = this.worldToMap(235, -270, size);
+    g.fillStyle = '#5a5a60';
+    g.fillRect(rx0, rz0, rx1 - rx0, rz1 - rz0);
+    const [tx0, tz0] = this.worldToMap(45, -237, size);
+    const [tx1, tz1] = this.worldToMap(115, -223, size);
+    g.fillStyle = '#cbb98f';
+    g.fillRect(tx0, tz0, tx1 - tx0, tz1 - tz0);
+    // the marina on the east shore: a bite of harbour water in the sand,
+    // with the boardwalk drawn along its west bank
+    const [mx0, mz0] = this.worldToMap(260, -60, size);
+    const [mx1, mz1] = this.worldToMap(294, 140, size);
+    g.fillStyle = '#2e8fa8';
+    g.fillRect(mx0, mz0, mx1 - mx0, mz1 - mz0);
+    const [wx0, wz0] = this.worldToMap(252, -64, size);
+    const [wx1, wz1] = this.worldToMap(260, 144, size);
+    g.fillStyle = '#a98f66';
+    g.fillRect(wx0, wz0, wx1 - wx0, wz1 - wz0);
     return c;
   }
 

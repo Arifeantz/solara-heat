@@ -1,10 +1,17 @@
-// missions.js — Marina Sol's jobs: the four-mission story of Solara Heat.
+// missions.js — Marina Sol's jobs: the five-mission story of Solara Heat.
 //
 // Dario Venn washes up in Port Solana with $120 and a duffel bag. Marina,
 // who runs Café Solmar, puts him to work: learn the streets, run a package
-// off the docks, lift a marked sports car for a buyer, and finally drive the
-// coast road to the lighthouse — where the police are waiting. Each mission
-// is a marker on the map, a line of story, a cash reward, and a next job.
+// off the docks, lift a marked sports car for a buyer, drive the coast road
+// to the lighthouse — where the police are waiting — and finally sprint a
+// ticking crate down the runway at Solana Airfield before the night flight
+// leaves. Each mission is a marker on the map, a line of story, a cash
+// reward, and a next job.
+//
+// And once the story is told, the work is not: Marina keeps finding
+// crates, and the Encore Runs — randomised pickup-and-deliver jobs
+// between the city's landmarks, against the ferry clock — loop for as
+// long as Dario keeps showing up.
 
 import { GeoBuilder, Obj, hexColor } from './engine.js';
 import { dist2d } from './random.js';
@@ -59,6 +66,20 @@ export const MISSION_DEFS = [
     objective3: 'Return to Café Solmar',
     done: 'You did it. Port Solana is yours now, Dario. The café is always open to you.',
   },
+  {
+    id: 'airmail',
+    title: 'Night Flight',
+    reward: 800,
+    intro: [
+      ['Marina', 'One more, Dario — the last one, I promise. A charter flight comes into Solana Airfield tonight.'],
+      ['Marina', 'A crate comes off it that customs must never see. Collect it at the terminal, run it to the marker at the far end of the runway before the flight leaves, then come back to me.'],
+    ],
+    objective: 'Collect the crate at Solana Airfield terminal',
+    objective2: 'Run the crate to the far runway marker — before the flight leaves',
+    objective3: 'Return to Café Solmar',
+    done: 'On the manifest as "machine parts". You are a natural, Dario. Now — truly — Port Solana is yours.',
+    timeLimit: 90,
+  },
 ];
 
 export class Missions {
@@ -81,7 +102,9 @@ export class Missions {
   }
 
   get currentDef() {
-    return this.active ? MISSION_DEFS[this.active.defIndex] : null;
+    if (!this.active) return null;
+    // encore runs carry their own generated def (defIndex -1)
+    return this.active.defIndex >= 0 ? MISSION_DEFS[this.active.defIndex] : this.encoreDef;
   }
 
   marker() {
@@ -90,8 +113,11 @@ export class Missions {
   }
 
   objectiveText() {
-    if (this.storyDone) return 'Free roam — Port Solana is yours. Steal cars, dodge the SPD, make money.';
-    if (!this.active) return '';
+    if (!this.active) {
+      return this.storyDone
+        ? 'Free roam — Port Solana is yours. Steal cars, dodge the SPD, make money.'
+        : '';
+    }
     const def = this.currentDef;
     if (this.active.stage === 0) return def.objective;
     if (this.active.stage === 1) return def.objective2 || def.objective;
@@ -99,6 +125,10 @@ export class Missions {
   }
 
   startNext() {
+    if (this.storyDone) {
+      this.startEncore();
+      return;
+    }
     if (this.index >= MISSION_DEFS.length) {
       this.storyDone = true;
       this.hooks.onStoryDone();
@@ -109,6 +139,33 @@ export class Missions {
     this.hooks.showStory(def.intro);
     this.setStageTarget();
     if (def.id === 'hotcar') this.hooks.spawnMissionCar();
+  }
+
+  // After the story: an endless drip of side work. Two landmarks are
+  // drawn — a pickup and a drop-off, never the same place — and the job
+  // pays a flat courier's rate against the ferry clock.
+  startEncore() {
+    const L = this.world.landmarks;
+    const spots = [L.docks, L.garage, L.airport, L.hangar, L.lighthouse, L.police, L.hospital, L.marina, L.fishmarket];
+    const pick = spots[Math.floor(Math.random() * spots.length)];
+    let drop = spots[Math.floor(Math.random() * spots.length)];
+    if (drop === pick) drop = spots[(spots.indexOf(pick) + 3) % spots.length];
+    this.encoreDef = {
+      id: 'encore',
+      title: 'Encore Run',
+      reward: 150,
+      intro: [
+        ['Marina', `Dario. A crate turned up at ${pick.name} that belongs at ${drop.name}.`],
+        ['Marina', 'The ferry schedule is the clock. You know how this goes by now.'],
+      ],
+      objective: `Pick up the crate at ${pick.name}`,
+      objective2: `Deliver the crate to ${drop.name}`,
+      done: 'Done and dusted. There is always another crate in Port Solana.',
+      timeLimit: 150,
+    };
+    this.active = { defIndex: -1, stage: 0, timer: null, target: null, pickup: pick, drop };
+    this.hooks.showStory(this.encoreDef.intro);
+    this.setStageTarget();
   }
 
   setStageTarget() {
@@ -122,6 +179,16 @@ export class Missions {
       if (a.stage === 0) a.target = { ...L.lighthouse, label: 'Lighthouse' };
       else if (a.stage === 1) a.target = null; // lose the heat: no marker, just run
       else a.target = { ...L.cafe, label: 'Café Solmar' };
+    }
+    else if (def.id === 'airmail') {
+      if (a.stage === 0) a.target = { ...L.airport, label: 'Solana Airfield' };
+      else if (a.stage === 1) a.target = { ...L.runwayEnd, label: 'Runway Marker' };
+      else a.target = { ...L.cafe, label: 'Café Solmar' };
+    }
+    else if (def.id === 'encore') {
+      a.target = a.stage === 0
+        ? { ...a.pickup, label: a.pickup.name }
+        : { ...a.drop, label: a.drop.name };
     }
     this.placeBeacon();
   }
@@ -138,19 +205,25 @@ export class Missions {
 
   finishMission() {
     const def = this.currentDef;
+    const encore = def.id === 'encore';
     this.hooks.showStory([['Marina', def.done]]);
     this.hooks.onReward(def.reward, def.title);
     this.active = null;
-    this.index += 1;
+    if (!encore) this.index += 1; // encore runs do not advance the story
     this.completedCount += 1;
     this.placeBeacon();
     this.hooks.saveGame();
-    if (this.index < MISSION_DEFS.length) {
+    if (encore) {
+      // side work never runs out: another crate turns up before long
+      this.nextJobIn = 9;
+    } else if (this.index < MISSION_DEFS.length) {
       // the next job arrives a few seconds later, by phone
       this.nextJobIn = 6;
     } else {
       this.storyDone = true;
       this.hooks.onStoryDone();
+      // and once the story is told, the encore runs begin
+      this.nextJobIn = 10;
     }
   }
 
@@ -175,7 +248,12 @@ export class Missions {
         a.timer = null;
         a.stage = 0;
         this.setStageTarget();
-        this.hooks.showStory([['Marina', 'Too slow — the tide turned. The package is back at the docks.']]);
+        const line = def.id === 'airmail'
+          ? 'The flight left without you. The crate is back at the terminal — drive up and try again.'
+          : def.id === 'encore'
+            ? 'The ferry left without it. The crate is back where you found it — the fare stands, if you still want it.'
+            : 'Too slow — the tide turned. The package is back at the docks.';
+        this.hooks.showStory([['Marina', line]]);
         return;
       }
     }
@@ -225,6 +303,34 @@ export class Missions {
         this.setStageTarget();
         this.hooks.showStory([['Dario', 'Clear. Time to go home.']]);
       } else if (a.stage === 2 && near(a.target, 8)) {
+        this.finishMission();
+      }
+    }
+    if (def.id === 'airmail') {
+      if (a.stage === 0 && near(a.target, 10)) {
+        a.stage = 1;
+        a.timer = def.timeLimit;
+        this.setStageTarget();
+        this.hooks.showStory([
+          ['Dockmaster', 'That crate? The one sweating in the sun by the freight door? All yours, friend.'],
+          ['Dario', 'It is ticking. Crates should not tick. Runway. Now.'],
+        ]);
+      } else if (a.stage === 1 && near(a.target, 12)) {
+        a.stage = 2;
+        a.timer = null;
+        this.setStageTarget();
+        this.hooks.showStory([['Dario', 'Handed off at the marker, wheels up behind me. Whatever that was — not my problem any more.']]);
+      } else if (a.stage === 2 && near(a.target, 8)) {
+        this.finishMission();
+      }
+    }
+    if (def.id === 'encore') {
+      if (a.stage === 0 && near(a.target, 8)) {
+        a.stage = 1;
+        a.timer = def.timeLimit;
+        this.setStageTarget();
+        this.hooks.showStory([['Dario', 'Another crate, another ferry to beat. Some things never change.']]);
+      } else if (a.stage === 1 && near(a.target, 9)) {
         this.finishMission();
       }
     }

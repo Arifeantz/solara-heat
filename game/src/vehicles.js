@@ -18,6 +18,8 @@ export const CAR_TYPES = {
   hatch: { length: 3.9, width: 1.8, bodyH: 0.66, cabinH: 0.56, maxSpeed: 28, accel: 12, name: 'Pico Hatch' },
   sport: { length: 4.6, width: 1.95, bodyH: 0.5, cabinH: 0.4, maxSpeed: 40, accel: 18, name: 'Vandal GT' },
   van: { length: 5.0, width: 2.0, bodyH: 1.15, cabinH: 0.5, maxSpeed: 24, accel: 9, name: 'Hauler Van' },
+  buggy: { length: 3.6, width: 1.85, bodyH: 0.5, cabinH: 0.42, maxSpeed: 34, accel: 16, name: 'Dune Buggy' },
+  pickup: { length: 4.9, width: 1.95, bodyH: 0.72, cabinH: 0.58, maxSpeed: 28, accel: 12, name: 'Rancher Pickup' },
   taxi: { length: 4.4, width: 1.9, bodyH: 0.62, cabinH: 0.52, maxSpeed: 30, accel: 12, name: 'Solana Cab' },
 };
 
@@ -36,6 +38,51 @@ function buildCarObject(gl, type, colorHex, isPolice) {
   if (type === 'van') {
     b.box(0, bodyY + spec.bodyH / 2 + spec.cabinH / 2, -L * 0.08, W * 0.96, spec.cabinH + 0.5, L * 0.78, body);
     b.box(0, bodyY + spec.bodyH / 2 + 0.35, L * 0.36, W * 0.9, 0.5, 0.15, glass);
+  } else if (type === 'buggy') {
+    // an open beach buggy: no roof, no glass — two bucket seats, a roll
+    // cage of thin tube, the engine out back where everyone can see it
+    const seat = hexColor(0x8a3324);
+    const cage = hexColor(0x2f353b);
+    b.box(0, bodyY + 0.12, -L * 0.02, W * 0.78, 0.3, L * 0.42, dark); // seat base
+    b.box(-W * 0.2, bodyY + 0.48, -L * 0.14, 0.44, 0.55, 0.42, seat); // seat backs
+    b.box(W * 0.2, bodyY + 0.48, -L * 0.14, 0.44, 0.55, 0.42, seat);
+    const cageBase = bodyY + spec.bodyH / 2;
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        b.box(sx * W * 0.38, cageBase + 0.42, sz * L * 0.21 - L * 0.03, 0.09, 0.88, 0.09, cage);
+      }
+      b.box(sx * W * 0.38, cageBase + 0.88, -L * 0.03, 0.09, 0.09, L * 0.5, cage); // side rails
+    }
+    b.box(0, cageBase + 0.88, L * 0.22 - L * 0.03, W * 0.8, 0.09, 0.09, cage); // front bar
+    b.box(0, cageBase + 0.88, -L * 0.28 - L * 0.03, W * 0.8, 0.09, 0.09, cage); // rear bar
+    // the exposed engine, with twin exhaust stacks poking up behind
+    b.box(0, bodyY + 0.22, -L * 0.4, W * 0.58, 0.46, L * 0.2, dark);
+    b.cylinder(-W * 0.18, bodyY + 0.62, -L * 0.46, 0.06, 0.06, 0.55, 6, hexColor(0x9aa0a4));
+    b.cylinder(W * 0.18, bodyY + 0.62, -L * 0.46, 0.06, 0.06, 0.55, 6, hexColor(0x9aa0a4));
+    // a light bar over the nose for night runs on the sand
+    b.box(0, bodyY + 0.55, L * 0.47, W * 0.66, 0.13, 0.13, dark);
+    for (const lx of [-0.25, 0, 0.25]) {
+      b.box(lx * W, bodyY + 0.55, L * 0.48, 0.2, 0.11, 0.05, hexColor(0xfff2c0));
+    }
+  } else if (type === 'pickup') {
+    // a working pickup: a proper cab over the front third, then an open
+    // bed with side walls and a tailgate — and the spare wheel riding in
+    // the bed, because Solana roads eat tyres
+    const cabBase = bodyY + spec.bodyH / 2;
+    b.box(0, cabBase + spec.cabinH / 2 - 0.02, L * 0.24, W * 0.84, spec.cabinH, L * 0.34, glass);
+    b.box(0, cabBase + spec.cabinH - 0.04, L * 0.24, W * 0.88, 0.09, L * 0.38, body); // cab roof
+    b.box(0, cabBase + 0.1, L * 0.42, W * 0.88, spec.cabinH * 0.7, 0.1, body); // cab back panel
+    // the bed: floor, two side walls, a tailgate, all at body height
+    b.box(0, bodyY + 0.18, -L * 0.22, W * 0.92, 0.14, L * 0.5, dark); // bed floor
+    b.box(-W * 0.44, bodyY + 0.32, -L * 0.22, 0.09, 0.42, L * 0.5, body); // side walls
+    b.box(W * 0.44, bodyY + 0.32, -L * 0.22, 0.09, 0.42, L * 0.5, body);
+    b.box(0, bodyY + 0.32, -L * 0.47, W * 0.92, 0.42, 0.09, body); // tailgate
+    // the spare, lying flat in the bed on its rim
+    b.cylinder(-W * 0.18, bodyY + 0.36, -L * 0.2, 0.4, 0.4, 0.24, 10, hexColor(0x17191c));
+    b.cylinder(-W * 0.18, bodyY + 0.37, -L * 0.2, 0.2, 0.2, 0.26, 6, hexColor(0x9aa0a4));
+    // a toolbox and a jerry can strapped behind the cab
+    b.box(W * 0.22, bodyY + 0.42, -L * 0.06, 0.62, 0.34, 0.4, hexColor(0x9aa0a4));
+    b.box(-W * 0.28, bodyY + 0.4, -L * 0.06, 0.3, 0.42, 0.24, hexColor(0xbc4749));
   } else {
     b.box(0, bodyY + spec.bodyH / 2 + spec.cabinH / 2 - 0.04, -L * 0.06, W * 0.82, spec.cabinH, L * 0.46, glass); // glasshouse
     b.box(0, bodyY + spec.bodyH / 2 + spec.cabinH - 0.06, -L * 0.06, W * 0.86, 0.09, L * 0.5, body); // roof
@@ -60,15 +107,18 @@ function buildCarObject(gl, type, colorHex, isPolice) {
   b.box(W * 0.32, bodyY + 0.08, -L / 2 - 0.05, 0.42, 0.14, 0.05, hexColor(0xd64545));
   const root = new Obj(b.build(gl));
 
-  // wheels: one shared dark cylinder, four nodes that spin and steer
+  // wheels: one shared dark cylinder, four nodes that spin and steer;
+  // the buggy rides on taller off-road rubber than the street cars
+  const wheelR = type === 'buggy' ? 0.46 : 0.37;
+  const wheelW = type === 'buggy' ? 0.34 : 0.28;
   const wb = new GeoBuilder();
-  wb.cylinder(0, 0, 0, 0.37, 0.37, 0.28, 10, hexColor(0x17191c));
-  wb.cylinder(0, 0, 0, 0.2, 0.2, 0.3, 6, hexColor(0x9aa0a4));
+  wb.cylinder(0, 0, 0, wheelR, wheelR, wheelW, 10, hexColor(0x17191c));
+  wb.cylinder(0, 0, 0, wheelR * 0.55, wheelR * 0.55, wheelW + 0.02, 6, hexColor(0x9aa0a4));
   const wheelMesh = wb.build(gl);
   const wheels = {};
   const mkWheel = (x, z, key) => {
     const pivot = new Obj();
-    pivot.pos = [x, 0.37, z];
+    pivot.pos = [x, wheelR, z];
     const spin = new Obj(wheelMesh);
     spin.rot = [0, 0, Math.PI / 2];
     pivot.add(spin);
@@ -171,7 +221,7 @@ export class TrafficSystem {
     // moving traffic, started on avenues near intersections
     for (let i = 0; i < count; i++) {
       const node = this.rng.pick(intersections);
-      const type = this.rng.pick(['sedan', 'sedan', 'hatch', 'taxi', 'van', 'sport']);
+      const type = this.rng.pick(['sedan', 'sedan', 'hatch', 'taxi', 'van', 'sport', 'buggy', 'pickup']);
       const color = type === 'taxi' ? 0xf7b731 : this.rng.pick(TRAFFIC_COLORS);
       const car = new Car(gl, type, color, node.x, node.z, 0, { driver: 'traffic' });
       car.fromNode = node;
@@ -182,7 +232,7 @@ export class TrafficSystem {
     // parked cars in the lots and along a few curbs
     for (const spot of world.parkedSpots) {
       if (this.rng.chance(0.35)) continue;
-      const type = this.rng.pick(['sedan', 'hatch', 'van', 'sport']);
+      const type = this.rng.pick(['sedan', 'hatch', 'van', 'sport', 'buggy', 'pickup']);
       const car = new Car(gl, type, this.rng.pick(TRAFFIC_COLORS), spot.x, spot.z, spot.heading, { driver: 'parked' });
       this.cars.push(car);
     }

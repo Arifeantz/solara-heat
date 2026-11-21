@@ -12,10 +12,12 @@
 import { Renderer, Obj, GeoBuilder, hexColor, Mat4 } from './engine.js';
 import { facadeTexture, shopTexture, asphaltTexture, sandTexture, glowTexture } from './textures.js';
 import { buildCity, GRID_LINES } from './city.js';
+import { buildAirport } from './airport.js';
+import { buildMarina } from './marina.js';
 import { Car, TrafficSystem, drivePlayerCar, carCarImpact } from './vehicles.js';
 import { Person, Pedestrians, Player } from './people.js';
 import { WantedSystem, PoliceSystem, losBlocked } from './police.js';
-import { Missions } from './missions.js';
+import { Missions, MISSION_DEFS } from './missions.js';
 import { Input } from './input.js';
 import { Hud } from './hud.js';
 import { GameAudio } from './audio.js';
@@ -36,8 +38,25 @@ const textures = {
 };
 
 const world = buildCity(renderer.gl, textures);
+// Solana Airfield on the north shore: fold its ground into the world the
+// other systems read, before any of them are built from it
+const airport = buildAirport(renderer.gl, textures);
+world.colliders.push(...airport.colliders);
+Object.assign(world.landmarks, airport.landmarks);
+world.parkedSpots.push(...airport.parkedSpots);
+world.sidewalkLoops.push(...airport.sidewalkLoops);
+// Solana Marina on the east shore, folded in the same way: its lagoon
+// collider keeps cars out of the water and its boardwalk joins the
+// pedestrian loops before the walkers are placed
+const marina = buildMarina(renderer.gl, textures);
+world.colliders.push(...marina.colliders);
+Object.assign(world.landmarks, marina.landmarks);
+world.parkedSpots.push(...marina.parkedSpots);
+world.sidewalkLoops.push(...marina.sidewalkLoops);
 const scene = new Obj();
 scene.add(world.group);
+scene.add(airport.group);
+scene.add(marina.group);
 
 const traffic = new TrafficSystem(renderer.gl, world, 14);
 const peds = new Pedestrians(renderer.gl, world, 26);
@@ -176,6 +195,8 @@ function startGame(fresh) {
   state = 'playing';
   started = true;
   if (!missions.active && !missions.storyDone) missions.startNext();
+  // a finished story still rings: the first encore run arrives shortly
+  else if (missions.storyDone && !missions.active) missions.nextJobIn = 3;
   canvas.requestPointerLock();
 }
 
@@ -369,7 +390,7 @@ function frame(nowMs) {
     if (state === 'playing') {
       state = 'paused';
       document.getElementById('pausestats').innerHTML =
-        'Cash: <b>$' + Math.floor(player.money) + '</b> · Missions done: <b>' + missions.completedCount + ' / 4</b>' +
+        'Cash: <b>$' + Math.floor(player.money) + '</b> · Missions done: <b>' + missions.completedCount + ' / ' + MISSION_DEFS.length + '</b>' +
         (missions.storyDone ? '<br>Story complete — free roam.' : '');
       document.getElementById('pause').classList.remove('hidden');
       document.exitPointerLock && document.exitPointerLock();
@@ -514,7 +535,7 @@ function frame(nowMs) {
   if (player.inCar && Math.abs(player.inCar.speed) > 4) threats.push({ x: pp.x, z: pp.z, radius: 10 });
   if (!player.inCar && player.punchTimer > 0.12) threats.push({ x: pp.x, z: pp.z, radius: 5 });
   for (const c of police.cars) threats.push({ x: c.x, z: c.z, radius: 5 });
-  peds.update(dt, threats);
+  peds.update(dt, threats, { x: pp.x, z: pp.z, inCar: !!player.inCar });
 
   // ---- missions
   missions.update(dt, {
@@ -531,6 +552,8 @@ function frame(nowMs) {
     if (c.pos[0] > 360) c.pos[0] = -360;
   }
   world.sea.emissive = 0.1 + Math.sin(now * 0.7) * 0.03;
+  airport.update(now);
+  marina.update(now);
 
   // ---- camera
   const focus = player.inCar ? player.inCar : player;

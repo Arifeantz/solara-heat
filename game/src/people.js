@@ -48,6 +48,9 @@ export class Person {
     this.state = 'walk'; // walk | flee | down | idle
     this.stateTimer = 0;
     this.punchTimer = 0;
+    this.waveTimer = 0; // >0: right arm raised, waving at the player
+    this.phoneTimer = 0; // >0: right hand held to the ear, mid phone call
+    this.photoTimer = 0; // >0: both hands up, framing a photo of the view
 
     const root = new Obj();
     root.pos = [this.x, 0, this.z];
@@ -96,8 +99,12 @@ export class Person {
       this.obj.pos = [this.x, 0.25, this.z];
       return;
     }
+    if (this.waveTimer > 0) this.waveTimer = Math.max(0, this.waveTimer - dt);
+    if (this.phoneTimer > 0) this.phoneTimer = Math.max(0, this.phoneTimer - dt);
+    if (this.photoTimer > 0) this.photoTimer = Math.max(0, this.photoTimer - dt);
     const moving = Math.abs(this.speed) > 0.15;
     if (moving) this.phase += dt * (4 + Math.abs(this.speed) * 1.6);
+    if (this.waveTimer > 0) this.phase += dt * 3; // the wave needs its own clock
     const swing = moving ? Math.sin(this.phase) * clamp(Math.abs(this.speed) * 0.16, 0.1, 0.62) : 0;
     this.legL.rot[0] = swing;
     this.legR.rot[0] = -swing;
@@ -107,6 +114,33 @@ export class Person {
       // right arm jabs forward and back
       const t = this.punchTimer / 0.28;
       this.armR.rot[0] = -Math.sin(t * Math.PI) * 1.5;
+    }
+    if (this.photoTimer > 0) {
+      // a tourist's photo stop: both hands raised, holding an invisible
+      // phone level with the view, head tipped back for the skyline
+      this.armL.rot[0] = -1.8;
+      this.armL.rot[2] = 0.35;
+      this.armR.rot[0] = -1.9;
+      this.armR.rot[2] = -0.35;
+      this.head.rot[2] = 0;
+      this.head.rot[0] = -0.14;
+    } else if (this.waveTimer > 0) {
+      // a friendly wave: the right arm goes up and wags from the shoulder
+      this.armR.rot[0] = -2.7 + Math.sin(this.phase * 7) * 0.3;
+      this.armR.rot[2] = -0.3;
+      this.head.rot[2] = 0;
+      this.head.rot[0] = 0;
+    } else if (this.phoneTimer > 0) {
+      // a phone call: hand pinned to the ear, head tipped toward it
+      this.armR.rot[0] = -0.5;
+      this.armR.rot[2] = -2.3;
+      this.head.rot[2] = 0.15;
+      this.head.rot[0] = 0;
+    } else {
+      this.armL.rot[2] = 0;
+      this.armR.rot[2] = 0;
+      this.head.rot[2] = 0;
+      this.head.rot[0] = 0;
     }
     const bob = moving ? Math.abs(Math.sin(this.phase)) * 0.05 : 0;
     this.hips.pos[1] = 0.98 + bob;
@@ -126,6 +160,22 @@ export class Pedestrians {
       person.s = this.rng.range(0, 8 * loop.half);
       person.dir = this.rng.chance(0.5) ? 1 : -1;
       person.walkSpeed = this.rng.range(1.1, 1.7);
+      // an ambient routine for the stroll: most people just walk, some are
+      // out jogging the shore, some stop every so often to take a call,
+      // and the tourists keep stopping to photograph the skyline
+      person.kind = 'walker';
+      const roll = this.rng.next();
+      if (roll < 0.14) {
+        person.kind = 'jogger';
+        person.walkSpeed = this.rng.range(2.9, 3.6);
+      } else if (roll < 0.38) {
+        person.kind = 'chatter';
+      } else if (roll < 0.56) {
+        person.kind = 'tourist';
+      }
+      person.pauseIn = this.rng.range(7, 22); // seconds until the next stop
+      person.pauseLeft = 0; // seconds left in the current stop
+      person.waveIn = this.rng.range(2, 9); // politeness cooldown for waving
       this.placeOnLoop(person);
       this.list.push(person);
     }
@@ -142,7 +192,7 @@ export class Pedestrians {
     if (p.dir < 0) p.heading += Math.PI;
   }
 
-  update(dt, threats) {
+  update(dt, threats, playerPos = null) {
     for (const p of this.list) {
       if (p.state === 'down') {
         p.stateTimer -= dt;
@@ -179,6 +229,45 @@ export class Pedestrians {
           p.speed = 3.6;
           p.x += Math.sin(p.heading) * p.speed * dt;
           p.z += Math.cos(p.heading) * p.speed * dt;
+          p.syncObj(dt);
+          continue;
+        }
+      }
+      // ambient routines, played out between threats and the stroll
+      if (p.pauseLeft > 0) {
+        // stopped mid-routine: a chatter takes their call, a tourist
+        // frames their photo — either way, the stroll can wait
+        p.pauseLeft -= dt;
+        p.speed = 0;
+        if (p.kind === 'tourist') p.photoTimer = Math.max(p.photoTimer, 0.3);
+        else p.phoneTimer = Math.max(p.phoneTimer, 0.3);
+        if (p.pauseLeft <= 0) {
+          p.phoneTimer = 0;
+          p.photoTimer = 0;
+          p.pauseIn = this.rng.range(9, 26);
+        }
+        p.syncObj(dt);
+        continue;
+      }
+      if (p.kind === 'chatter' || p.kind === 'tourist') {
+        p.pauseIn -= dt;
+        if (p.pauseIn <= 0) {
+          p.pauseLeft = p.kind === 'tourist'
+            ? this.rng.range(1.6, 3.0)
+            : this.rng.range(2.2, 4.5);
+          p.speed = 0;
+          p.syncObj(dt);
+          continue;
+        }
+      }
+      if (playerPos && !playerPos.inCar && p.waveTimer <= 0) {
+        // a passer-by close by, on foot and unhurried, gets a wave
+        p.waveIn -= dt;
+        if (p.waveIn <= 0 && dist2d(p.x, p.z, playerPos.x, playerPos.z) < 6) {
+          p.waveTimer = 1.5;
+          p.waveIn = this.rng.range(6, 14);
+          p.heading = Math.atan2(playerPos.x - p.x, playerPos.z - p.z);
+          p.speed = 0;
           p.syncObj(dt);
           continue;
         }

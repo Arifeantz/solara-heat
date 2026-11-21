@@ -1,49 +1,143 @@
-// Solara Heat — Port Solana: entry program for the make.fun "Make GTA 6" bounty.
+// main.ts — the hand-in program for Solara Heat: Port Solana.
 //
-// The game itself lives in game/ as plain static files and screenshots/ holds
-// the maker's captures of it. This program hands the entry in: it copies both
-// folders into the output directory and writes the dossier that the judge
-// reads, using the kit's own dossier library so the bytes match the gate's
-// rebuild exactly. It runs on Node 22 with the standard library only, does no
-// network access, and writes the same bytes on every run.
+// Run with Node 22 (`node main.ts`, no flags, no build, no install). It
+// ships the game to the output directory and proves what it shipped:
+//
+//   1. It copies this repository's game/ and screenshots/ into the output
+//      directory (MAKEFUN_OUTPUT_DIR, default /output), replacing whatever
+//      an earlier run left in those two subdirectories.
+//   2. It writes dossier.json beside them: the dossier of the shipped
+//      directory, built by the kit's own library (vendor/makefun-game.ts,
+//      used unchanged) under the bounty's caps, so the bytes are exactly
+//      what the scorer recomputes from the same game/ and screenshots/.
+//
+// The source tree is the repository this file lives in — MAKEFUN_BOT_DIR
+// when the grader sets it, otherwise the directory holding main.ts. The
+// program reads nothing over the network and writes nothing outside the
+// output directory. Run it twice over the same tree and the dossier is
+// byte-identical: it is a function of the files' bytes and nothing else.
 
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import { buildDossier } from './vendor/makefun-game.ts';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildDossier } from './vendor/makefun-game.ts';
 
-// The gate's published caps for this bounty, handed to buildDossier so the
-// dossier it writes is the one the scorer rebuilds from the same files.
-const GATE_CAPS = {
-  text_max_bytes: 163_840,
-  screenshots: { max: 4, max_bytes: 256 * 1024 },
+// The bounty's caps, as its gate names them. Only text_max_bytes shapes
+// the dossier's bytes; the rest only refuse input that is past them, so
+// they are passed too — this program should fail where the scorer would.
+const CAPS = {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
   game_max_files: 993,
-  game_max_bytes: 48 * 1024 * 1024,
-  game_path_max_bytes: 1000,
+  game_max_bytes: 50331648,
 };
 
-function entryRoot(): string {
-  // In the grader the repository sits at MAKEFUN_BOT_DIR; anywhere else this
-  // file's own folder is the repository root.
-  const fromEnv = process.env.MAKEFUN_BOT_DIR;
-  if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
+// The two trees an entry hands in, and the dossier written beside them.
+const TREES = ['game', 'screenshots'];
+const DOSSIER_NAME = 'dossier.json';
+const DOSSIER_SCHEMA = 'makefun/dossier/v1';
+
+// Where the repository lives: the grader's bot directory when it is set,
+// else this file's own directory (a plain `node main.ts` in the repo).
+function sourceRoot(): string {
+  const bot = process.env.MAKEFUN_BOT_DIR;
+  if (bot !== undefined && bot.length > 0) return bot;
   return dirname(fileURLToPath(import.meta.url));
 }
 
+// Where the entry goes: MAKEFUN_OUTPUT_DIR, defaulting to /output.
 function outputRoot(): string {
-  const fromEnv = process.env.MAKEFUN_OUTPUT_DIR;
-  if (fromEnv !== undefined && fromEnv !== '') return fromEnv;
+  const out = process.env.MAKEFUN_OUTPUT_DIR;
+  if (out !== undefined && out.length > 0) return out;
   return '/output';
 }
 
+// Every file under dir, as paths relative to dir in code-unit order, with
+// directories visited in the same order so the walk is deterministic.
+// Symbolic links and special files are refused, as the dossier refuses
+// them: an entry is plain files and directories only.
+function listFiles(dir: string, rel: string, out: string[]): string[] {
+  const entries = readdirSync(rel === '' ? dir : join(dir, rel), { withFileTypes: true });
+  entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  for (const entry of entries) {
+    const path = rel === '' ? entry.name : `${rel}/${entry.name}`;
+    const stat = lstatSync(join(dir, path));
+    if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
+      throw new Error(`${path}: a symbolic link or special file (an entry holds plain files only)`);
+    }
+    if (stat.isDirectory()) listFiles(dir, path, out);
+    else out.push(path);
+  }
+  return out;
+}
+
+// Copy one tree (game/ or screenshots/) from the repository into the
+// output directory, replacing the copy a previous run left there. Only
+// the two named subdirectories of the output are ever removed — never
+// the output directory itself, which may be a mount the grader owns.
+// Returns how many files were copied and their total size in bytes.
+function copyTree(from: string, to: string): { files: number; bytes: number } {
+  if (!existsSync(from) || !lstatSync(from).isDirectory()) {
+    throw new Error(`${from}: no such directory (an entry hands in its game/ and screenshots/)`);
+  }
+  if (existsSync(to)) rmSync(to, { recursive: true, force: true });
+  mkdirSync(to, { recursive: true });
+  let files = 0;
+  let bytes = 0;
+  for (const rel of listFiles(from, '', [])) {
+    const target = join(to, rel);
+    mkdirSync(dirname(target), { recursive: true });
+    const data = readFileSync(join(from, rel));
+    writeFileSync(target, data);
+    files += 1;
+    bytes += data.length;
+  }
+  return { files, bytes };
+}
+
 function main(): void {
-  const root = entryRoot();
+  const src = sourceRoot();
   const out = outputRoot();
   mkdirSync(out, { recursive: true });
-  cpSync(join(root, 'game'), join(out, 'game'), { recursive: true });
-  cpSync(join(root, 'screenshots'), join(out, 'screenshots'), { recursive: true });
-  const dossier = buildDossier(out, GATE_CAPS);
-  writeFileSync(join(out, 'dossier.json'), dossier);
+
+  // Ship the two trees first: the dossier describes the output directory,
+  // so it is built only once the copies are in place.
+  let totalFiles = 0;
+  let totalBytes = 0;
+  for (const tree of TREES) {
+    const copied = copyTree(join(src, tree), join(out, tree));
+    totalFiles += copied.files;
+    totalBytes += copied.bytes;
+    console.log(`${tree}/: ${copied.files} files, ${copied.bytes} bytes`);
+  }
+
+  // The dossier, from the kit library, over what was just shipped.
+  const dossier = buildDossier(out, CAPS);
+  writeFileSync(join(out, DOSSIER_NAME), dossier);
+
+  // Read it back before declaring success: it must parse, and it must
+  // name the schema the scorer expects. A dossier that does not read
+  // back is a failed hand-in, and this program should say so loudly.
+  const written = readFileSync(join(out, DOSSIER_NAME));
+  if (written.length !== dossier.length) {
+    throw new Error(`${DOSSIER_NAME}: wrote ${dossier.length} bytes, read back ${written.length}`);
+  }
+  const parsed: unknown = JSON.parse(written.toString('utf8'));
+  if (
+    typeof parsed !== 'object' || parsed === null ||
+    (parsed as { schema?: unknown }).schema !== DOSSIER_SCHEMA
+  ) {
+    throw new Error(`${DOSSIER_NAME}: not a ${DOSSIER_SCHEMA} dossier`);
+  }
+  console.log(`${DOSSIER_NAME}: ${written.length} bytes (${totalFiles} files, ${totalBytes} bytes shipped)`);
 }
 
 main();
