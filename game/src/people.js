@@ -58,7 +58,7 @@ export class Person {
     this.hips = hips;
     // torso hangs up from the hips: use a part that extends upward
     const torso = new Obj(partMesh(gl, 0.52, 0.62, 0.3, this.shirt, 'torso-up'));
-    torso.pos = [0, 0.62, 0];
+    torso.pos = [0, 0, 0];
     torso.rot = [Math.PI, 0, 0]; // flip the hang-down part to stand up
     hips.add(torso);
     const head = new Obj(ballMesh(gl, 0.21, this.skin, 'head'));

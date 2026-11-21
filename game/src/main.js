@@ -249,9 +249,8 @@ function leaveCar(silent = false) {
   if (!car) return;
   car.driver = 'parked';
   player.inCar = null;
-  // step out on the left side of the car
+  // step out on the right side of the car
   const side = 2.0;
-  player.x = car.x + -Math.cos(car.heading) * -side * -1;
   player.x = car.x - Math.cos(car.heading) * side;
   player.z = car.z + Math.sin(car.heading) * side;
   player.heading = car.heading;
@@ -270,9 +269,10 @@ function setupPhoto(mode) {
   state = 'playing';
   started = true;
   missions.index = 1;
+  // the camera sits at the player's heading + π: behind him, looking his way
   if (mode === 'foot') {
     player.x = 14; player.z = 203; player.heading = Math.PI * 0.92;
-    input.yaw = Math.PI * 0.92;
+    input.yaw = Math.PI * 0.92 + Math.PI;
     missions.startNext();
   } else if (mode === 'drive') {
     const car = new Car(renderer.gl, 'sedan', 0xd97b6c, -30, 93.3, Math.PI / 2, { driver: 'player' });
@@ -280,24 +280,32 @@ function setupPhoto(mode) {
     addToScene(car.obj);
     player.inCar = car;
     player.obj.visible = false;
-    input.yaw = Math.PI / 2;
+    input.yaw = Math.PI / 2 + Math.PI;
     missions.startNext();
   } else if (mode === 'chase') {
-    const car = new Car(renderer.gl, 'sport', 0xe63946, 30, 3.3, -Math.PI / 2, { driver: 'player' });
+    const car = new Car(renderer.gl, 'sport', 0xe63946, 30, -3.3, -Math.PI / 2, { driver: 'player' });
     car.speed = 21;
     addToScene(car.obj);
     player.inCar = car;
     player.obj.visible = false;
-    input.yaw = -Math.PI / 2;
+    input.yaw = -Math.PI / 2 + Math.PI;
     wanted.commitOffence(120, 0);
+    // cruisers on the scene: one cutting in ahead, one on his tail
+    for (const [cx, cz] of [[6, 4.2], [48, -3.3]]) {
+      const cop = new Car(renderer.gl, 'sedan', 0xffffff, cx, cz, -Math.PI / 2, { police: true, driver: 'police' });
+      cop.speed = 19;
+      police.cars.push(cop);
+      addToScene(cop.obj);
+    }
     missions.startNext();
   } else if (mode === 'mission') {
     player.x = 45; player.z = 186; player.heading = Math.PI;
-    input.yaw = Math.PI;
+    input.yaw = Math.PI * 2;
     missions.index = 1;
     missions.startNext();
     if (missions.active) {
       missions.active.stage = 1;
+      missions.active.timer = 154;
       missions.setStageTarget();
     }
   }
@@ -445,7 +453,7 @@ function frame(nowMs) {
     // on foot
     input.turnCamera(dt);
     const axes = input.walkAxes();
-    player.updateOnFoot(dt, axes, input.yaw, input.down('ShiftLeft') || input.down('ShiftRight'), world.colliders);
+    player.updateOnFoot(dt, axes, input.yaw + Math.PI, input.down('ShiftLeft') || input.down('ShiftRight'), world.colliders);
     const nearCar = nearestEnterableCar();
     if (nearCar) {
       prompt = 'E — Take the ' + nearCar.spec.name;
@@ -538,7 +546,6 @@ function frame(nowMs) {
     input.pitch += (0.3 - input.pitch) * Math.min(1, dt * 2);
   }
   const yaw = input.yaw, pitch = input.pitch;
-  const tx = focus.x ?? focus.x;
   const px = (player.inCar ? focus.x : player.x);
   const pz = (player.inCar ? focus.z : player.z);
   const camX = px + Math.sin(yaw) * Math.cos(pitch) * camDist;
@@ -571,6 +578,9 @@ function frame(nowMs) {
     if (started && state === 'playing') saveGame();
   }
   input.endFrame();
+
+  renderer.begin();
+  scene.render(renderer, Mat4.identity());
 }
 requestAnimationFrame(frame);
 

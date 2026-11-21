@@ -8,7 +8,7 @@ export class Input {
   constructor(canvas) {
     this.keys = new Set();
     this.pressed = new Set(); // keys that went down since the last poll
-    this.yaw = Math.PI; // camera starts looking into the city (-z)
+    this.yaw = 0; // camera orbit angle: at 0 it sits south of the player, looking north into the city
     this.pitch = 0.32;
     this.locked = false;
     this.canvas = canvas;

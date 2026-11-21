@@ -217,13 +217,10 @@ export class TrafficSystem {
     const aimZ = to.z + rz * LANE_OFFSET - dirz * 4;
     const myLaneX = car.fromNode.x + rx * LANE_OFFSET;
     const myLaneZ = car.fromNode.z + rz * LANE_OFFSET;
-    // blend: hold the lane line, aim at the node as we near it
-    const along = Math.abs(dirx) > 0 ? (car.x - myLaneX) * dirx + (car.z - myLaneZ) * 0 : (car.z - myLaneZ) * dirz;
+    // hold the lane line while far off, swing toward the node's lane near it
     const remain = Math.abs(dirx) > 0 ? Math.abs(to.x - car.x) : Math.abs(to.z - car.z);
-    const targetX = remain < 18 ? aimX : myLaneX + dirx * 10 + car.x * 0 - (Math.abs(dirx) > 0 ? 0 : 0);
-    const targetZ = remain < 18 ? aimZ : myLaneZ + dirz * 10;
-    const tx = Math.abs(dirx) > 0 ? car.x + dirx * 10 : targetX;
-    const tz = Math.abs(dirz) > 0 ? car.z + dirz * 10 : targetZ;
+    const tx = remain < 18 ? aimX : Math.abs(dirx) > 0 ? car.x + dirx * 10 : myLaneX;
+    const tz = remain < 18 ? aimZ : Math.abs(dirz) > 0 ? car.z + dirz * 10 : myLaneZ;
     const want = Math.atan2(tx - car.x, tz - car.z);
     const delta = angleDelta(car.heading, want);
     car.steer = clamp(delta * 1.6, -0.55, 0.55);
@@ -251,9 +248,9 @@ export class TrafficSystem {
     car.z += fz * car.speed * dt;
     if (remain < 5) {
       const arrived = car.toNode;
+      const previous = car.fromNode;
       car.fromNode = arrived;
-      car.toNode = nextIntersection(rng, car.fromNode === arrived ? null : null, arrived);
-      car.toNode = nextIntersection(rng, car.fromNode, arrived);
+      car.toNode = nextIntersection(rng, previous, arrived);
       if (rng.chance(0.18)) car.waitTimer = rng.range(0.4, 1.2);
     }
     car.syncObj();

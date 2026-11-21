@@ -136,18 +136,6 @@ export class GeoBuilder {
     this.quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1], [0, -1, 0], color, R); // bottom
     return this;
   }
-  prism(cx, cy, cz, sx, sy, sz, color) {
-    // a box whose top face slopes down toward -z: car bonnets and wedges
-    const x0 = cx - sx / 2, x1 = cx + sx / 2;
-    const y0 = cy - sy / 2, y1 = cy + sy / 2;
-    const z0 = cz - sz / 2, z1 = cz + sz / 2;
-    const yt = y1 - sy * 0.45; // front-top edge sits lower
-    const nSlope = norm3([0, sz * 0.45, sy]);
-    this.quad([x0, y0, z1], [x1, y0, z1], [x1, yt, z0 + sz], [x0, yt, z0 + sz], [0, 0, 1], color);
-    // (front face degenerates to the sloped top below; keep it simple)
-    this.pos.length -= 0; // no-op, clarity
-    return this;
-  }
   cylinder(cx, cy, cz, rTop, rBottom, h, seg, color, capped = true) {
     const y0 = cy - h / 2, y1 = cy + h / 2;
     for (let i = 0; i < seg; i++) {
@@ -227,28 +215,6 @@ attribute vec3 aCol;
 attribute vec2 aUv;
 uniform mat4 uMVP;
 uniform mat4 uModel;
-varying vec3 vCol;
-varying vec3 vNor;
-varying vec2 vUv;
-varying float vDist;
-void main() {
-  vec4 world = uModel * vec4(aPos, 1.0);
-  vNor = mat3(uModel) * aNor;
-  vCol = aCol;
-  vUv = aUv;
-  gl_Position = uMVP * vec4(aPos, 1.0);
-  vDist = -gl_Position.z;
-  gl_Position = gl_Position;
-  vDist = length(world.xyz - uCamPos);
-}
-`;
-const VERT2 = `
-attribute vec3 aPos;
-attribute vec3 aNor;
-attribute vec3 aCol;
-attribute vec2 aUv;
-uniform mat4 uMVP;
-uniform mat4 uModel;
 uniform vec3 uCamPos;
 varying vec3 vCol;
 varying vec3 vNor;
@@ -309,7 +275,7 @@ export class Renderer {
       return s;
     };
     const prog = gl.createProgram();
-    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT2));
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
     gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
@@ -344,9 +310,9 @@ export class Renderer {
     this.sunDir = [0.45, 0.8, 0.35];
     this.sunCol = [1.05, 0.95, 0.8];
     this.skyCol = [0.42, 0.48, 0.55];
-    this.fogCol = [0.98, 0.8, 0.62];
-    this.fogNear = 120;
-    this.fogFar = 420;
+    this.fogCol = [0.87, 0.79, 0.68];
+    this.fogNear = 150;
+    this.fogFar = 500;
     this.camPos = [0, 0, 0];
   }
   resize(w, h) {

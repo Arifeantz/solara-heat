@@ -172,7 +172,7 @@ export class Hud {
     const [px, pz] = this.worldToMap(s.player.x, s.player.z, size);
     g.save();
     g.translate(px, pz);
-    g.rotate(Math.atan2(Math.sin(s.player.heading), Math.cos(s.player.heading)) * 0 + headingAngle(s.player.heading));
+    g.rotate(headingAngle(s.player.heading));
     g.fillStyle = '#ffffff';
     g.strokeStyle = 'rgba(0,0,0,0.55)';
     g.beginPath();
@@ -187,10 +187,10 @@ export class Hud {
   }
 }
 
-// canvas y grows downward and the map's z grows downward too, so a heading
-// of 0 (facing +z, "south") must point down the map: rotate by -heading+π…
-// worked out on paper: screen angle = atan2(sin, cos) of the heading mapped
-// through (x right, z down) is simply the heading itself negated around π.
+// The map draws world x to the right and world z downward, and the arrow
+// glyph points up the canvas. A heading's forward vector (sin h, cos h) in
+// world space is (sin h, cos h) on the map too, so the arrow must rotate by
+// π − h for its tip to track the way the player faces.
 function headingAngle(heading) {
-  return Math.PI - heading + Math.PI;
+  return Math.PI - heading;
 }

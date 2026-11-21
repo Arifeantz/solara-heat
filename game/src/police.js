@@ -156,9 +156,12 @@ export class PoliceSystem {
     } else {
       // road pursuit: pick the neighbouring intersection that closes in
       const to = car.toNode || car.fromNode;
-      const arrived = dist2d(car.x, car.z, to.x, to.z) < 9;
+      const arrived = !to || dist2d(car.x, car.z, to.x, to.z) < 9;
       if (arrived || !car.toNode) {
-        const from = to;
+        const from = to || intersections.reduce(
+          (best, n) => (dist2d(car.x, car.z, n.x, n.z) < dist2d(car.x, car.z, best.x, best.z) ? n : best),
+          intersections[0],
+        );
         const options = intersections.filter(
           (n) => (n.x === from.x || n.z === from.z) && n !== from &&
             Math.abs(n.x - from.x) + Math.abs(n.z - from.z) === 90,
