@@ -19,6 +19,60 @@ Marina Sol of Café Solmar has work for a driver who doesn't ask questions:
 4. **Solana Sunset** — drive to the lighthouse, where the police are
    waiting, and lose the heat.
 
+## How to play
+
+**Run it locally.** The game is plain static files, but the browser loads
+its code as ES modules, so serve it over HTTP rather than opening it from
+disk:
+
+```
+cd game
+python3 -m http.server 8000
+# then open http://localhost:8000/ in a desktop browser
+```
+
+Any static file server does the job. Click **START ENGINE** to begin a
+new story, or **CONTINUE** when a save exists: your money, health,
+position and place in the story are kept in the browser's local storage,
+and the pause menu can restart the story from scratch.
+
+**Work the story.** You are Dario Venn, on foot with $120. A column of
+golden light marks the current objective and the minimap points the same
+way; walk or drive into the ring to advance. Marina's dialogue sets each
+job up, finishing one pays its reward, and the next job arrives a few
+seconds later. The four jobs pay $50, $180, $350 and $600:
+
+- *First Wheels* ends the moment you get into any car — walk up to one
+  (the prompt names it) and press **E**. You can only climb back out once
+  the car has nearly stopped.
+- *The Dock Run* starts its clock when you pick the crate up: 170 seconds
+  to reach Café Solmar. Run out of time and the crate is back at the
+  docks, ready to be picked up again — no other penalty.
+- *Hot Merchandise* wants one specific car, the teal Vandal GT parked by
+  the marina lots. Climbing in trips its alarm and brings the police,
+  and the job only counts when you roll into Venn Auto still in that car.
+- *Solana Sunset* sends you to the lighthouse, where cruisers are
+  waiting. Shake every star off, then drive back to the café to finish
+  the story. After that, Port Solana is free roam.
+
+**Mind the heat.** Almost everything fun is an offence, and offences feed
+a heat score that turns into one to five stars: stealing a car (worse if
+a pedestrian or a cruiser sees it), punching someone, ramming traffic or
+a cruiser, speeding past a watching cruiser, and — the biggest single
+offence of all — running a pedestrian down. One cruiser answers per
+star, up to five. Cruisers hunt the last place an officer actually saw
+you and share their sightings, so break line of sight behind the towers
+and stay clean: after a few hidden seconds with no fresh offence, the
+heat drains and the stars fall away.
+
+**Don't get cornered.** If a cruiser stays close while you are on foot
+or nearly stopped, the bust meter fills in about two and a half seconds.
+**BUSTED** costs a fine of $100 plus $60 a star (never more than you
+carry) and drops you at the police station with a clean record. Crash
+hard enough, or get run down yourself, and your health runs out instead:
+**WASTED** means St. Solana Hospital, a bill of up to $150, and a fresh
+start outside its doors.
+
 ## What's in the world
 
 - A seeded, sun-soaked coastal city: a grid of avenues with pastel towers,
